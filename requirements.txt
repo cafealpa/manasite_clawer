@@ -5,3 +5,4 @@ selenium~=4.34.2
 cryptography>=42.0.0
 Pillow
 google-genai
+pyinstaller

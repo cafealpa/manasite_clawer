@@ -416,7 +416,7 @@ class CrawlerEngine:
                     # We need to wait to see if it worked. This blocks.
                     # Ideally we break loop and check again in outer loop.
                     # But keeping it simple:
-                    time.sleep(3)
+                    time.sleep(1)
                     
                     if not self.parser.is_captcha_page(self.driver.current_url, ""):
                         logger.info(f"Worker {worker_id}: Captcha Solved!")

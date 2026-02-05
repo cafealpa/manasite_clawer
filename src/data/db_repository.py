@@ -9,11 +9,24 @@ DB_FILE = 'crawled_pages.db'
 class DBRepository:
     def __init__(self, db_path=DB_FILE):
         self.db_path = db_path
-        self._create_tables()
-        self._migrate_schema()
+        self._initialized = False
+        # self._create_tables() # Lazy Init
+        # self._migrate_schema()
+
+    def _initialize_db(self):
+        if not self._initialized:
+            self._initialized = True
+            try:
+                self._create_tables()
+                self._migrate_schema()
+            except Exception:
+                self._initialized = False
+                raise
 
     @contextmanager
     def _get_connection(self):
+        if not self._initialized:
+            self._initialize_db()
         conn = sqlite3.connect(self.db_path)
         try:
             yield conn
@@ -21,7 +34,9 @@ class DBRepository:
             conn.close()
 
     def _create_tables(self):
-        with self._get_connection() as conn:
+        # Use direct connection to avoid recursion
+        conn = sqlite3.connect(self.db_path)
+        try:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS crawled_urls (
@@ -39,10 +54,14 @@ class DBRepository:
                 )
             """)
             conn.commit()
+        finally:
+            conn.close()
 
     def _migrate_schema(self):
         """Attempts to migrate schema for existing tables."""
-        with self._get_connection() as conn:
+        # Use direct connection to avoid recursion
+        conn = sqlite3.connect(self.db_path)
+        try:
             cursor = conn.cursor()
             try:
                 # Try adding list_url column if it doesn't exist
@@ -51,6 +70,8 @@ class DBRepository:
             except sqlite3.OperationalError:
                 # Column likely already exists
                 pass
+        finally:
+            conn.close()
 
     def get_config(self, key: str) -> Optional[str]:
         with self._get_connection() as conn:

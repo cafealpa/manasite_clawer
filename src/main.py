@@ -5,6 +5,7 @@ import threading
 from ui.main_window import MainWindow
 from core.engine import CrawlerEngine
 from utils.logger import logger
+from data.db_repository import db
 
 def run_cli(url, output_dir, threads):
     print(f"Starting CLI Crawler...")
@@ -37,9 +38,14 @@ def main():
     parser.add_argument("--url", type=str, help="Target URL to crawl (e.g., https://manatoki.net/comic/123)")
     parser.add_argument("-o", "--output", type=str, default="downloaded_files", help="Download directory path")
     parser.add_argument("-t", "--threads", type=int, default=4, help="Number of download threads")
+    parser.add_argument("--db-path", type=str, help="Path to database file")
     parser.add_argument("--gui", action="store_true", help="Launch the GUI application")
     
     args = parser.parse_args()
+
+    # Apply DB Path if provided
+    if args.db_path:
+        db.db_path = args.db_path
 
     # Case 1: No arguments provided OR --gui flag -> GUI Mode
     if len(sys.argv) == 1 or args.gui:

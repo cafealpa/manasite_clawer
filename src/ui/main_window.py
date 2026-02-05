@@ -33,17 +33,18 @@ class MainWindow(tk.Tk):
         menubar = tk.Menu(self)
         self.config(menu=menubar)
         
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="종료", command=self._on_close)
-        menubar.add_cascade(label="파일", menu=file_menu)
+        # Menu
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
         
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="기본 설정", command=self._open_settings)
-        menubar.add_cascade(label="설정", menu=settings_menu)
+        main_menu = tk.Menu(menubar, tearoff=0)
+        main_menu.add_command(label="DB Viewer", command=self._open_db_viewer)
+        main_menu.add_command(label="기본 설정", command=self._open_settings)
+        main_menu.add_command(label="About", command=self._show_about)
+        main_menu.add_separator()
+        main_menu.add_command(label="종료", command=self._on_close)
         
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="DB Viewer", command=self._open_db_viewer)
-        menubar.add_cascade(label="도구", menu=tools_menu)
+        menubar.add_cascade(label="메뉴", menu=main_menu)
 
         # Main Layout
         main_frame = ttk.Frame(self, padding=10)
@@ -154,6 +155,9 @@ class MainWindow(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", f"Could not open DB Viewer: {e}")
 
+    def _show_about(self):
+        messagebox.showinfo("About", "Manatoki Crawler\nVersion 2.0\n\nCreated by Google DeepMind (simulated)")
+
     def _start_crawling(self):
         url = self.url_var.get().strip()
         if not url:
@@ -162,19 +166,36 @@ class MainWindow(tk.Tk):
 
         path = self.path_var.get()
         
-        # Auto-save URL
-        if path and os.path.isdir(path):
-            try:
-                list_url_path = os.path.join(path, "list_url.txt")
-                with open(list_url_path, 'w', encoding='utf-8') as f:
-                    f.write(url)
-            except Exception as e:
-                logger.warning(f"Failed to save list_url.txt: {e}")
-
         try:
             threads = int(self.threads_var.get())
         except:
             threads = 4
+
+        # Auto-save URL and create batch file
+        if path and os.path.isdir(path):
+            try:
+                # 1. Save list_url.txt
+                list_url_path = os.path.join(path, "list_url.txt")
+                with open(list_url_path, 'w', encoding='utf-8') as f:
+                    f.write(url)
+                
+                # 2. Create download.bat if not exists
+                bat_path = os.path.join(path, "download.bat")
+                if not os.path.exists(bat_path):
+                    with open(bat_path, 'w', encoding='utf-8') as f:
+                        # Assumes ManatokiDownloader.exe is in PATH or same dir. 
+                        # Usually user puts the exe separately.
+                        # We use relative path assuming the bat is run where the exe "would be" or specific logic?
+                        # User request: "ManatokiDownloader.exe" command.
+                        # We will assume the user has the exe accessible. 
+                        # Or better: We can't know absolute path of exe if distributed.
+                        # Simple command with explicit DB path
+                        cmd = f'..\\ManatokiDownloader.exe --url "{url}" --output "%~dp0." --threads {threads} --db-path "..\\crawled_pages.db"\npause'
+                        f.write(cmd)
+                    self._append_log(f"Created batch file: {bat_path}")
+
+            except Exception as e:
+                logger.warning(f"Failed to save auto-files: {e}")
 
         self.engine = CrawlerEngine(download_path=path, num_download_threads=threads)
         self._toggle_ui(running=True)
