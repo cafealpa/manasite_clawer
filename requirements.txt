@@ -1,0 +1,7 @@
+seleniumbase~=4.40.6
+beautifulsoup4~=4.13.4
+requests~=2.32.4
+selenium~=4.34.2
+cryptography>=42.0.0
+Pillow
+google-genai
