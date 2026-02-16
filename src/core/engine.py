@@ -3,14 +3,12 @@ import os
 import re
 import threading
 import concurrent.futures
-import random
 from urllib.parse import urlparse
 from seleniumbase import Driver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 
 from utils.logger import logger
 from data.db_repository import db
