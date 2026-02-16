@@ -10,3 +10,4 @@ __pycache__/
 
 PROJECT_ANALYSIS.md
 src/crawled_pages.db
+/src/downloaded_files/
