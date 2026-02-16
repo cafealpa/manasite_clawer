@@ -2,3 +2,10 @@
 /build/
 /dist/
 /ManatokiDownloader.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+PROJECT_ANALYSIS.md

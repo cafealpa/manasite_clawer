@@ -17,24 +17,22 @@ from core.captcha_solver import GeminiSolver
 from core.downloader import ImageDownloader
 
 class CrawlerEngine:
-    def __init__(self, download_path: str, num_download_threads: int = 2):
+    def __init__(self, download_path: str, num_download_threads: int = 2, captcha_auto_solve: bool = True):
         """
         :param download_path: Path to save downloaded files
         :param num_download_threads: Number of WORKER TABS to open (Parallel Browsing)
+        :param captcha_auto_solve: Whether to use Gemini API for captcha solving
         """
         self.download_path = download_path
-        self.num_workers = num_download_threads  # Interpret as number of browser tabs
+        self.num_workers = num_download_threads
+        self.captcha_auto_solve = captcha_auto_solve
         self.driver = None
-        # 브라우저 동기화 설정
-        # 메모리 절약 및 봇 탐지 우회(UC 모드)를 일관되게 유지하기 위해 단일 드라이버 인스턴스를 공유합니다.
-        # Selenium의 WebDriver는 스레드 안전(thread-safe)하지 않으므로 threading.Lock이 필수적입니다.
         self.driver_lock = threading.Lock()
         self.stop_event = threading.Event()
         
         # Components
         self.parser = ManatokiParser()
         self.captcha_solver = GeminiSolver()
-        # Downloader internal threads can be kept low since we have N page workers
         self.downloader = ImageDownloader(max_threads=2) 
         
         self.is_running = False
@@ -151,12 +149,15 @@ class CrawlerEngine:
         # Assumes driver is on the Main Tab (first tab)
         with self.driver_lock:
             try:
+                logger.info("Start getting episode list...")
                 # Ensure we are on the first tab
                 if self.driver.window_handles:
                     self.driver.switch_to.window(self.driver.window_handles[0])
                 
                 self.driver.get(target_url)
-                
+
+                time.sleep(1)
+
                 # Check for Captcha on List Page
                 if self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
                     logger.info("Captcha detected on List Page. Solving...")
@@ -411,17 +412,23 @@ class CrawlerEngine:
             scroll_count += 1
 
     def _handle_captcha(self, worker_id: int):
-        # 왜 이 방식을 사용하나요?
-        # URL을 통해 직접 이미지를 다운로드하는 대신 엘리먼트 스크린샷을 사용합니다.
-        # 이는 새로운 캡차 생성을 유발하거나 세션 불일치가 발생하는 것을 방지하기 위함입니다.
-        # 최대 재시도 횟수는 무한 루프와 API 비용 과다 발생을 막기 위해 제한됩니다.
         # Assumes LOCK is HELD
+        if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
+            return
+
+        if self.captcha_auto_solve:
+            self._handle_captcha_auto(worker_id)
+        else:
+            self._handle_captcha_manual(worker_id)
+
+    def _handle_captcha_auto(self, worker_id: int):
+        """Gemini API를 사용한 자동 캡챠 해결"""
         max_retries = 3
         for i in range(max_retries):
             if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
                 return
 
-            logger.warning(f"Worker {worker_id}: Captcha detected. Attempt {i+1}")
+            logger.warning(f"Worker {worker_id}: Captcha detected. Auto-solve attempt {i+1}")
             try:
                 captcha_img = self.driver.find_element(By.CSS_SELECTOR, "img[src*='kcaptcha_image.php']")
                 img_data = captcha_img.screenshot_as_png
@@ -438,9 +445,6 @@ class CrawlerEngine:
                     except:
                          self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
                     
-                    # We need to wait to see if it worked. This blocks.
-                    # Ideally we break loop and check again in outer loop.
-                    # But keeping it simple:
                     time.sleep(1)
                     
                     if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
@@ -457,4 +461,35 @@ class CrawlerEngine:
                 time.sleep(3)
         
         logger.error(f"Worker {worker_id}: Failed to solve Captcha automatically.")
+
+    def _handle_captcha_manual(self, worker_id: int):
+        """유저가 직접 캡챠를 입력할 때까지 대기"""
+        logger.info(f"Worker {worker_id}: 캡챠 감지됨. 브라우저에서 직접 캡챠를 입력해 주세요...")
+        
+        # 락을 풀어야 유저가 브라우저를 조작할 수 있고,
+        # 이 메서드는 이미 락 안에서 호출되므로 바깥에서 폴링해야 합니다.
+        # 하지만 _handle_captcha는 락 내부에서 호출되므로,
+        # 여기서는 단순히 대기만 합니다 (브라우저는 유저가 조작 가능).
+        max_wait = 120  # 최대 2분 대기
+        elapsed = 0
+        poll_interval = 3
+        
+        while elapsed < max_wait:
+            if self.stop_event.is_set():
+                return
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+            
+            try:
+                if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
+                    logger.info(f"Worker {worker_id}: 유저가 캡챠를 해결했습니다!")
+                    return
+            except Exception:
+                pass
+            
+            remaining = max_wait - elapsed
+            if remaining > 0 and elapsed % 15 == 0:
+                logger.info(f"Worker {worker_id}: 캡챠 입력 대기 중... (남은 시간: {remaining}초)")
+        
+        logger.error(f"Worker {worker_id}: 캡챠 입력 시간 초과 (2분).")
 

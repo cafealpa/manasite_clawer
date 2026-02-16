@@ -1,3 +1,4 @@
+import logging
 from typing import List
 from bs4 import BeautifulSoup
 from .base_parser import BaseParser
@@ -47,7 +48,8 @@ class ManatokiParser(BaseParser):
         return images
 
     def is_captcha_page(self, current_url: str, html_source: str) -> bool:
-        if "bbs/captcha.php" in current_url:
+        logging.warning("is_captcha_page - current_url: " + current_url)
+        if "/bbs/captcha.php" in current_url:
             return True
         if html_source and "kcaptcha_image.php" in html_source:
             return True

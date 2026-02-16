@@ -6,182 +6,146 @@ import queue
 from utils.logger import logger
 from core.engine import CrawlerEngine
 from ui.settings_dialog import SettingsDialog
-from db_viewer.db_viewer import DBViewer # Keeping legacy DBViewer for now
+from db_viewer.db_viewer import DBViewer
 from data.db_repository import db
 
 class MainWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Manatoki Crawler (Reborn)")
-        self.geometry("700x600")
+        self.geometry("850x650") # Slightly wider for sidebar
         
-        # Queue for thread-safe UI updates
         self.msg_queue = queue.Queue()
-        
-        # Engine
         self.engine = None
         self.engine_thread = None
+        self.current_view = None
+        
+        # PERSISTENT VARIABLES (Shared across views)
+        self.url_var = tk.StringVar()
+        self.path_var = tk.StringVar(value="downloaded_files")
+        self.threads_var = tk.StringVar(value="2")
+        
+        # Persistent log area to keep logs when switching views
+        self.log_area_persistent = scrolledtext.ScrolledText(None, state='disabled')
         
         self._create_widgets()
         self._setup_logger()
         
-        # periodic check for queue
         self.after(100, self._process_queue)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _create_widgets(self):
-        # Menu
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-        
-        # Menu
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-        
-        main_menu = tk.Menu(menubar, tearoff=0)
-        main_menu.add_command(label="DB Viewer", command=self._open_db_viewer)
-        main_menu.add_command(label="최신 업데이트", command=self._open_latest_updates)
-        main_menu.add_command(label="기본 설정", command=self._open_settings)
-        main_menu.add_command(label="About", command=self._show_about)
-        main_menu.add_separator()
-        main_menu.add_command(label="종료", command=self._on_close)
-        
-        menubar.add_cascade(label="메뉴", menu=main_menu)
+        # 1. Main Layout Containers
+        self.sidebar = ttk.Frame(self, width=170, padding=10)
+        self.sidebar.pack(side='left', fill='y')
+        self.sidebar.pack_propagate(False)
 
-        # Main Layout
-        main_frame = ttk.Frame(self, padding=10)
-        main_frame.pack(fill='both', expand=True)
+        self.content_container = ttk.Frame(self, padding=10)
+        self.content_container.pack(side='right', fill='both', expand=True)
 
+        # 2. Sidebar Menu
+        ttk.Label(self.sidebar, text="MANATOKI\nCRAWLER", font=('Helvetica', 14, 'bold'), justify='center').pack(pady=(10, 30))
+        
+        menu_items = [
+            ("🏠 수집 메인", self._show_dashboard),
+            ("🆕 최신 목록", self._show_latest_updates),
+            ("📁 DB 확인", self._show_db_viewer),
+            ("⚙️ 기본 설정", self._show_settings),
+        ]
+        
+        self.menu_buttons = {}
+        for text, command in menu_items:
+            btn = ttk.Button(self.sidebar, text=text, command=command)
+            btn.pack(fill='x', pady=4)
+            self.menu_buttons[text] = btn
+
+        ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', pady=20)
+        ttk.Button(self.sidebar, text="About", command=self._show_about).pack(fill='x')
+        ttk.Button(self.sidebar, text="종료", command=self._on_close).pack(fill='x', pady=4)
+
+        # 3. Initial View
+        self._show_dashboard()
+
+    def _show_view(self, view_frame):
+        if self.current_view:
+            self.current_view.destroy()
+        self.current_view = view_frame
+        self.current_view.pack(fill='both', expand=True)
+
+    def _show_dashboard(self):
+        frame = ttk.Frame(self.content_container)
+        
         # 1. URL Input
-        url_frame = ttk.LabelFrame(main_frame, text="수집 대상", padding=10)
+        url_frame = ttk.LabelFrame(frame, text="수집 대상", padding=10)
         url_frame.pack(fill='x', pady=5)
         
         ttk.Label(url_frame, text="URL:").pack(side='left')
-        self.url_var = tk.StringVar()
         self.url_entry = ttk.Entry(url_frame, textvariable=self.url_var)
         self.url_entry.pack(side='left', fill='x', expand=True, padx=5)
 
         # 2. Options
-        opt_frame = ttk.LabelFrame(main_frame, text="옵션", padding=10)
+        opt_frame = ttk.LabelFrame(frame, text="옵션", padding=10)
         opt_frame.pack(fill='x', pady=5)
         
         ttk.Label(opt_frame, text="다운로드 경로:").pack(side='left')
-        self.path_var = tk.StringVar(value="downloaded_files")
         ttk.Entry(opt_frame, textvariable=self.path_var).pack(side='left', fill='x', expand=True, padx=5)
         ttk.Button(opt_frame, text="선택", command=self._browse_path).pack(side='left')
         
         ttk.Separator(opt_frame, orient='vertical').pack(side='left', fill='y', padx=10)
         
         ttk.Label(opt_frame, text="다운로드 스레드:").pack(side='left')
-        self.threads_var = tk.StringVar(value="2")
         ttk.Spinbox(opt_frame, from_=1, to=8, textvariable=self.threads_var, width=5).pack(side='left', padx=5)
 
         # 3. Controls
-        btn_frame = ttk.Frame(main_frame, padding=5)
+        btn_frame = ttk.Frame(frame, padding=5)
         btn_frame.pack(fill='x', pady=5)
         
         self.btn_start = ttk.Button(btn_frame, text="수집 시작", command=self._start_crawling)
         self.btn_start.pack(side='left', fill='x', expand=True, padx=5)
         
         self.btn_stop = ttk.Button(btn_frame, text="중지", command=self._stop_crawling, state='disabled')
+        if self.engine and self.engine.is_running:
+            self.btn_stop.config(state='normal')
+            self.btn_start.config(state='disabled')
         self.btn_stop.pack(side='left', fill='x', expand=True, padx=5)
 
         # 4. Logs
-        log_frame = ttk.LabelFrame(main_frame, text="로그", padding=5)
+        log_frame = ttk.LabelFrame(frame, text="로그", padding=5)
         log_frame.pack(fill='both', expand=True, pady=5)
         
-        self.log_area = scrolledtext.ScrolledText(log_frame, state='disabled')
-        self.log_area.pack(fill='both', expand=True)
-
-    def _setup_logger(self):
-        # Add listener to global logger
-        def on_log(level, msg):
-            self.msg_queue.put(msg)
-        
-        logger.add_listener(on_log)
-
-    def _process_queue(self):
-        try:
-            while not self.msg_queue.empty():
-                msg = self.msg_queue.get_nowait()
-                self._append_log(msg)
-                
-                # Check for specific messages to toggle UI state?
-                # Better to use a separate check or callback from engine completion
-                if "Crawling Finished." in msg or "Stopping crawler..." in msg:
-                     # This is logically weak, but engine doesn't have events yet.
-                     # We might want to pass a callback to engine or poll engine state.
-                     pass 
-        except queue.Empty:
-            pass
-        
-        # Check engine state and update UI
-        if self.engine:
-            if not self.engine.is_running:
-                # Engine stopped. If UI says running (Stop button enabled or Start disabled), reset it.
-                # Assuming if Start is disabled, we are in running state.
-                if str(self.btn_start['state']) == 'disabled':
-                    self._toggle_ui(running=False)
-
-        self.after(100, self._process_queue)
-
-    def _append_log(self, text):
-        self.log_area.config(state='normal')
-        self.log_area.insert(tk.END, text + "\n")
+        # Shared Log Area
+        self.log_area = scrolledtext.ScrolledText(log_frame, state='normal')
+        self.log_area.insert(tk.END, self.log_area_persistent.get('1.0', tk.END))
         self.log_area.see(tk.END)
         self.log_area.config(state='disabled')
+        self.log_area.pack(fill='both', expand=True)
 
-    def _browse_path(self):
-        path = filedialog.askdirectory()
-        if path:
-            self.path_var.set(path)
-            # Auto-load URL if exists
-            list_url_path = os.path.join(path, "list_url.txt")
-            if os.path.exists(list_url_path):
-                try:
-                    with open(list_url_path, 'r', encoding='utf-8') as f:
-                        saved_url = f.read().strip()
-                        if saved_url:
-                            self.url_var.set(saved_url)
-                            self._append_log(f"URL loaded from file: {saved_url}")
-                except Exception as e:
-                    logger.warning(f"Failed to load list_url.txt: {e}")
+        self._show_view(frame)
 
-    def _open_settings(self):
-        SettingsDialog(self)
+    def _show_db_viewer(self):
+        self._show_view(DBViewer(self.content_container))
 
-    def _open_db_viewer(self):
-        # Lazy import or use existing class
-        try:
-            DBViewer(self)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not open DB Viewer: {e}")
+    def _show_settings(self):
+        self._show_view(SettingsDialog(self.content_container))
 
-    def _open_latest_updates(self):
-        window = tk.Toplevel(self)
-        window.title("최신 업데이트")
-        window.geometry("800x500")
-
-        frame = ttk.Frame(window, padding=10)
-        frame.pack(fill='both', expand=True)
-
+    def _show_latest_updates(self):
+        frame = ttk.Frame(self.content_container, padding=10)
+        
         action_frame = ttk.Frame(frame)
         action_frame.pack(fill='x', pady=(0, 8))
 
-        btn_refresh = ttk.Button(action_frame, text="새로고침", command=lambda: self._load_latest_updates(tree))
-        btn_refresh.pack(side='left')
-
-        btn_crawl = ttk.Button(action_frame, text="선택 크롤링", command=lambda: self._crawl_selected_latest(tree))
-        btn_crawl.pack(side='left', padx=6)
+        ttk.Button(action_frame, text="새로고침", command=lambda: self._load_latest_updates(tree)).pack(side='left')
+        ttk.Button(action_frame, text="선택 크롤링", command=lambda: self._crawl_selected_latest(tree)).pack(side='left', padx=6)
 
         tree = ttk.Treeview(frame, columns=("Select", "List URL", "Title", "Last Crawled"), show='headings')
         tree.heading("Select", text="선택")
         tree.heading("List URL", text="List URL")
-        tree.heading("Title", text="Title")
-        tree.heading("Last Crawled", text="Last Crawled")
+        tree.heading("Title", text="제목")
+        tree.heading("Last Crawled", text="최근 수집")
+        
         tree.column("Select", width=50, anchor='center')
-        tree.column("List URL", width=350)
-        tree.column("Title", width=240)
+        tree.column("List URL", width=250)
+        tree.column("Title", width=200)
         tree.column("Last Crawled", width=120, anchor='center')
 
         scrollbar = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
@@ -193,15 +157,60 @@ class MainWindow(tk.Tk):
         tree.bind("<Button-1>", lambda event: self._on_latest_tree_click(tree, event))
 
         self._load_latest_updates(tree)
+        self._show_view(frame)
 
-    def _show_about(self):
-        messagebox.showinfo("About", "Manatoki Crawler\nVersion 2.0\n\nCreated by Google DeepMind (simulated)")
+    def _setup_logger(self):
+        def on_log(level, msg):
+            self.msg_queue.put(msg)
+        logger.add_listener(on_log)
+
+    def _process_queue(self):
+        try:
+            while not self.msg_queue.empty():
+                msg = self.msg_queue.get_nowait()
+                self._append_log(msg)
+        except queue.Empty:
+            pass
+        
+        if self.engine and not self.engine.is_running:
+            if hasattr(self, 'btn_start') and str(self.btn_start['state']) == 'disabled':
+                self._toggle_ui(running=False)
+
+        self.after(100, self._process_queue)
+
+    def _append_log(self, text):
+        # Update persistent store
+        self.log_area_persistent.config(state='normal')
+        self.log_area_persistent.insert(tk.END, text + "\n")
+        self.log_area_persistent.see(tk.END)
+        self.log_area_persistent.config(state='disabled')
+        
+        # Update UI if dashboard is active
+        if hasattr(self, 'log_area') and self.log_area.winfo_exists():
+            self.log_area.config(state='normal')
+            self.log_area.insert(tk.END, text + "\n")
+            self.log_area.see(tk.END)
+            self.log_area.config(state='disabled')
+
+    def _browse_path(self):
+        path = filedialog.askdirectory()
+        if path:
+            self.path_var.set(path)
+            list_url_path = os.path.join(path, "list_url.txt")
+            if os.path.exists(list_url_path):
+                try:
+                    with open(list_url_path, 'r', encoding='utf-8') as f:
+                        saved_url = f.read().strip()
+                        if saved_url:
+                            self.url_var.set(saved_url)
+                            self._append_log(f"URL loaded from file: {saved_url}")
+                except Exception as e:
+                    logger.warning(f"Failed to load list_url.txt: {e}")
 
     def _load_latest_updates(self, tree):
         for item in tree.get_children():
             tree.delete(item)
         tree.latest_check_vars.clear()
-
         try:
             rows = db.get_latest_mana_lists()
             for list_url, list_title, last_crawled in rows:
@@ -213,26 +222,16 @@ class MainWindow(tk.Tk):
 
     def _on_latest_tree_click(self, tree, event):
         region = tree.identify_region(event.x, event.y)
-        if region == "heading":
-            col = tree.identify_column(event.x)
-            if col == "#1":
-                self._toggle_all_latest(tree)
+        if region == "heading" and tree.identify_column(event.x) == "#1":
+            self._toggle_all_latest(tree)
             return
-
-        if region != "cell":
-            return
-
-        item_iid = tree.identify_row(event.y)
-        if not item_iid:
-            return
-
-        col = tree.identify_column(event.x)
-        if col == "#1":
-            var = tree.latest_check_vars.get(item_iid)
-            if var is None:
-                return
-            var.set(not var.get())
-            self._update_latest_checkbox(tree, item_iid, var.get())
+        if region == "cell" and tree.identify_column(event.x) == "#1":
+            item_iid = tree.identify_row(event.y)
+            if item_iid:
+                var = tree.latest_check_vars.get(item_iid)
+                if var:
+                    var.set(not var.get())
+                    self._update_latest_checkbox(tree, item_iid, var.get())
 
     def _update_latest_checkbox(self, tree, item_iid, is_checked):
         current_values = tree.item(item_iid, 'values')
@@ -251,35 +250,23 @@ class MainWindow(tk.Tk):
         if self.engine and self.engine.is_running:
             messagebox.showinfo("알림", "크롤링이 이미 진행 중입니다.")
             return
-
-        selected_urls = []
-        for item_iid, var in tree.latest_check_vars.items():
-            if var.get():
-                values = tree.item(item_iid, "values")
-                if len(values) >= 2:
-                    selected_urls.append(values[1])
-
+        selected_urls = [tree.item(iid, "values")[1] for iid, var in tree.latest_check_vars.items() if var.get()]
         if not selected_urls:
             messagebox.showinfo("알림", "크롤링할 항목을 선택해주세요.")
             return
-
         def run_batch():
             for url in selected_urls:
-                if self.engine and self.engine.is_running:
-                    break
+                if self.engine and self.engine.is_running: break
                 self._start_crawling_for_url(url)
             self._toggle_ui(running=False)
-
         threading.Thread(target=run_batch, daemon=True).start()
 
     def _start_crawling_for_url(self, url: str):
         path = self.path_var.get()
-        try:
-            threads = int(self.threads_var.get())
-        except:
-            threads = 4
-
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads)
+        try: threads = int(self.threads_var.get())
+        except: threads = 2
+        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto)
         self._toggle_ui(running=True)
         self.engine.start(url)
 
@@ -288,61 +275,36 @@ class MainWindow(tk.Tk):
         if not url:
             messagebox.showwarning("Warning", "URL을 입력해주세요.")
             return
-
         path = self.path_var.get()
+        try: threads = int(self.threads_var.get())
+        except: threads = 2
         
-        try:
-            threads = int(self.threads_var.get())
-        except:
-            threads = 4
-
-        # Auto-save URL and create batch file
+        # Auto-save and .bat creation logic (simplified)
         if path and os.path.isdir(path):
             try:
-                # 1. Save list_url.txt
-                list_url_path = os.path.join(path, "list_url.txt")
-                with open(list_url_path, 'w', encoding='utf-8') as f:
-                    f.write(url)
-                
-                # 2. Create download.bat if not exists
-                bat_path = os.path.join(path, "download.bat")
-                if not os.path.exists(bat_path):
-                    with open(bat_path, 'w', encoding='utf-8') as f:
-                        # Assumes ManatokiDownloader.exe is in PATH or same dir. 
-                        # Usually user puts the exe separately.
-                        # We use relative path assuming the bat is run where the exe "would be" or specific logic?
-                        # User request: "ManatokiDownloader.exe" command.
-                        # We will assume the user has the exe accessible. 
-                        # Or better: We can't know absolute path of exe if distributed.
-                        # Simple command with explicit DB path
-                        cmd = f'..\\ManatokiDownloader.exe --url "{url}" --output "%~dp0." --threads {threads} --db-path "..\\crawled_pages.db"\npause'
-                        f.write(cmd)
-                    self._append_log(f"Created batch file: {bat_path}")
+                with open(os.path.join(path, "list_url.txt"), 'w', encoding='utf-8') as f: f.write(url)
+            except: pass
 
-            except Exception as e:
-                logger.warning(f"Failed to save auto-files: {e}")
-
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads)
+        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto)
         self._toggle_ui(running=True)
-        
-        self.engine_thread = threading.Thread(target=self.engine.start, args=(url,))
-        self.engine_thread.daemon = True
+        self.engine_thread = threading.Thread(target=self.engine.start, args=(url,), daemon=True)
         self.engine_thread.start()
 
     def _stop_crawling(self):
-        if self.engine:
-            self.engine.stop()
-        self.btn_stop.config(state='disabled') # Indicate stopping logic started
+        if self.engine: self.engine.stop()
+        if hasattr(self, 'btn_stop'): self.btn_stop.config(state='disabled')
 
     def _toggle_ui(self, running):
-        if running:
-            self.btn_start.config(state='disabled')
-            self.btn_stop.config(state='normal')
-            self.url_entry.config(state='disabled')
-        else:
-            self.btn_start.config(state='normal')
-            self.btn_stop.config(state='disabled')
-            self.url_entry.config(state='normal')
+        if hasattr(self, 'btn_start') and self.btn_start.winfo_exists():
+            self.btn_start.config(state='disabled' if running else 'normal')
+        if hasattr(self, 'btn_stop') and self.btn_stop.winfo_exists():
+            self.btn_stop.config(state='normal' if running else 'disabled')
+        if hasattr(self, 'url_entry') and self.url_entry.winfo_exists():
+            self.url_entry.config(state='disabled' if running else 'normal')
+
+    def _show_about(self):
+        messagebox.showinfo("About", "Manatoki Crawler\nVersion 2.5 (Sidebar Integrated)\n\nCreated by Google DeepMind (simulated)")
 
     def _on_close(self):
         if self.engine and self.engine.is_running:

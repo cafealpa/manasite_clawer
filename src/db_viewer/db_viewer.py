@@ -3,12 +3,10 @@ from tkinter import ttk, messagebox
 import sqlite3
 from data.db_repository import db
 
-class DBViewer(tk.Toplevel):
+class DBViewer(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
-        self.title("DB 확인")
-        self.geometry("900x700")
-
+        
         self.check_vars = {}
         self._create_widgets()
         self.load_data()
