@@ -28,12 +28,6 @@ class SettingsDialog(ttk.Frame):
 
         ttk.Label(main_frame, text="* 캡차 해결을 위해 필요합니다.").pack(anchor='w', pady=(0, 10))
 
-        # Captcha Auto-Solve Toggle
-        ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
-        self.captcha_auto_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(main_frame, text="캡챠 자동 해결 (Gemini API 사용)", variable=self.captcha_auto_var).pack(anchor='w')
-        ttk.Label(main_frame, text="* 꺼져 있으면 캡챠 등장 시 유저가 직접 입력할 때까지 대기합니다.", foreground='gray').pack(anchor='w', pady=(0, 10))
-
         # Base Store Folder
         ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(main_frame, text="기본 저장 경로:").pack(anchor='w')
@@ -65,9 +59,6 @@ class SettingsDialog(ttk.Frame):
         key = db.get_config("GEMINI_API_KEY")
         if key:
             self.api_key_var.set(key)
-        # Captcha Auto-Solve
-        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE")
-        self.captcha_auto_var.set(captcha_auto != "false")
         # Base Store Folder
         base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER")
         if base_folder:
@@ -78,8 +69,6 @@ class SettingsDialog(ttk.Frame):
         key = self.api_key_var.get().strip()
         if key:
             db.set_config("GEMINI_API_KEY", key)
-        # Save Captcha Auto-Solve
-        db.set_config("CAPTCHA_AUTO_SOLVE", "true" if self.captcha_auto_var.get() else "false")
         # Save Base Store Folder
         base_folder = self.base_folder_var.get().strip()
         if base_folder:

@@ -19,17 +19,19 @@ from core.captcha_solver import GeminiSolver
 from core.downloader import ImageDownloader
 
 class CrawlerEngine:
-    def __init__(self, download_path: str, num_download_threads: int = 2, captcha_auto_solve: bool = True, base_store_folder: str = None):
+    def __init__(self, download_path: str, num_download_threads: int = 2, captcha_auto_solve: bool = True, base_store_folder: str = None, headless: bool = False):
         """
         :param download_path: Path to save downloaded files
         :param num_download_threads: Number of WORKER TABS to open (Parallel Browsing)
         :param captcha_auto_solve: Whether to use Gemini API for captcha solving
         :param base_store_folder: Base folder for auto-folder creation when download_path is empty
+        :param headless: Whether to run browser in headless mode
         """
         self.download_path = download_path
         self.base_store_folder = base_store_folder
         self.num_workers = num_download_threads
         self.captcha_auto_solve = captcha_auto_solve
+        self.headless = headless
         self.driver = None
         self.driver_lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -219,8 +221,9 @@ class CrawlerEngine:
 
     def _init_driver(self):
         if not self.driver:
-            logger.info("Initializing Browser...")
-            self.driver = Driver(uc=True, headless=False) 
+            mode = "Headless" if self.headless else "Normal"
+            logger.info(f"Initializing Browser ({mode} mode)...")
+            self.driver = Driver(uc=True, headless=self.headless) 
 
     def _get_episode_list(self, target_url: str):
         # Assumes driver is on the Main Tab (first tab)

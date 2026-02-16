@@ -24,6 +24,8 @@ class MainWindow(tk.Tk):
         self.url_var = tk.StringVar()
         self.path_var = tk.StringVar(value="downloaded_files")
         self.threads_var = tk.StringVar(value="2")
+        self.captcha_auto_var = tk.BooleanVar(value=db.get_config("CAPTCHA_AUTO_SOLVE") != "false")
+        self.headless_var = tk.BooleanVar(value=db.get_config("HEADLESS_MODE") == "true")
         self._status_counter = 0  # For throttling status refresh
         
         # Persistent log area to keep logs when switching views
@@ -123,15 +125,22 @@ class MainWindow(tk.Tk):
         # 2. Options
         opt_frame = ttk.LabelFrame(frame, text="옵션", padding=10)
         opt_frame.pack(fill='x', pady=5)
-        
-        ttk.Label(opt_frame, text="다운로드 경로:").pack(side='left')
-        ttk.Entry(opt_frame, textvariable=self.path_var).pack(side='left', fill='x', expand=True, padx=5)
-        ttk.Button(opt_frame, text="선택", command=self._browse_path).pack(side='left')
-        
-        ttk.Separator(opt_frame, orient='vertical').pack(side='left', fill='y', padx=10)
-        
-        ttk.Label(opt_frame, text="다운로드 스레드:").pack(side='left')
-        ttk.Spinbox(opt_frame, from_=1, to=8, textvariable=self.threads_var, width=5).pack(side='left', padx=5)
+
+        # Row 1: 다운로드 경로 + 스레드
+        row1 = ttk.Frame(opt_frame)
+        row1.pack(fill='x')
+        ttk.Label(row1, text="다운로드 경로:").pack(side='left')
+        ttk.Entry(row1, textvariable=self.path_var).pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Button(row1, text="선택", command=self._browse_path).pack(side='left')
+        ttk.Separator(row1, orient='vertical').pack(side='left', fill='y', padx=10)
+        ttk.Label(row1, text="스레드:").pack(side='left')
+        ttk.Spinbox(row1, from_=1, to=8, textvariable=self.threads_var, width=5).pack(side='left', padx=5)
+
+        # Row 2: 체크박스 옵션
+        row2 = ttk.Frame(opt_frame)
+        row2.pack(fill='x', pady=(5, 0))
+        ttk.Checkbutton(row2, text="캡챠 자동 해결", variable=self.captcha_auto_var, command=self._on_option_toggle).pack(side='left', padx=(0, 15))
+        ttk.Checkbutton(row2, text="백그라운드 실행 (Headless)", variable=self.headless_var, command=self._on_option_toggle).pack(side='left')
 
         # 3. Controls
         btn_frame = ttk.Frame(frame, padding=5)
@@ -232,6 +241,12 @@ class MainWindow(tk.Tk):
             self.log_area.see(tk.END)
             self.log_area.config(state='disabled')
 
+    def _on_option_toggle(self):
+        """체크박스 변경 시 즉시 DB에 저장"""
+        db.set_config("CAPTCHA_AUTO_SOLVE", "true" if self.captcha_auto_var.get() else "false")
+        db.set_config("HEADLESS_MODE", "true" if self.headless_var.get() else "false")
+        self._refresh_status()
+
     def _browse_path(self):
         path = filedialog.askdirectory()
         if path:
@@ -298,9 +313,8 @@ class MainWindow(tk.Tk):
         path = self.path_var.get()
         try: threads = int(self.threads_var.get())
         except: threads = 2
-        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
         base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER") or ""
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto, base_store_folder=base_folder)
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=self.captcha_auto_var.get(), base_store_folder=base_folder, headless=self.headless_var.get())
         self._toggle_ui(running=True)
 
         def run_batch():
@@ -323,9 +337,8 @@ class MainWindow(tk.Tk):
                 with open(os.path.join(path, "list_url.txt"), 'w', encoding='utf-8') as f: f.write(url)
             except: pass
 
-        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
         base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER") or ""
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto, base_store_folder=base_folder)
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=self.captcha_auto_var.get(), base_store_folder=base_folder, headless=self.headless_var.get())
         self._toggle_ui(running=True)
         self.engine_thread = threading.Thread(target=self.engine.start, args=(url,), daemon=True)
         self.engine_thread.start()
@@ -343,7 +356,7 @@ class MainWindow(tk.Tk):
             self.url_entry.config(state='disabled' if running else 'normal')
 
     def _show_about(self):
-        messagebox.showinfo("About", "Manatoki Crawler\nVersion 2.5 (Sidebar Integrated)\n\nCreated by Google DeepMind (simulated)")
+        messagebox.showinfo("About", "Manatoki Crawler\nVersion 3.0 (Sidebar Integrated)\n\nCreated by ChoChoCho with Gemini 3")
 
     def _on_close(self):
         if self.engine and self.engine.is_running:
