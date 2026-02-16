@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from data.db_repository import db
 
 class SettingsDialog(ttk.Frame):
@@ -34,6 +34,16 @@ class SettingsDialog(ttk.Frame):
         ttk.Checkbutton(main_frame, text="캡챠 자동 해결 (Gemini API 사용)", variable=self.captcha_auto_var).pack(anchor='w')
         ttk.Label(main_frame, text="* 꺼져 있으면 캡챠 등장 시 유저가 직접 입력할 때까지 대기합니다.", foreground='gray').pack(anchor='w', pady=(0, 10))
 
+        # Base Store Folder
+        ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(main_frame, text="기본 저장 경로:").pack(anchor='w')
+        base_frame = ttk.Frame(main_frame)
+        base_frame.pack(fill='x', pady=5)
+        self.base_folder_var = tk.StringVar()
+        ttk.Entry(base_frame, textvariable=self.base_folder_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(base_frame, text="선택", command=self._browse_base_folder).pack(side='left', padx=5)
+        ttk.Label(main_frame, text="* 다운로드 경로 미지정 시, 이 경로 아래에 제목별 폴더가 자동 생성됩니다.", foreground='gray').pack(anchor='w', pady=(0, 10))
+
         # Buttons
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill='x', pady=20)
@@ -45,6 +55,11 @@ class SettingsDialog(ttk.Frame):
         else:
             self.api_key_entry.config(show="*")
 
+    def _browse_base_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.base_folder_var.set(folder)
+
     def _load_settings(self):
         # API Key
         key = db.get_config("GEMINI_API_KEY")
@@ -53,6 +68,10 @@ class SettingsDialog(ttk.Frame):
         # Captcha Auto-Solve
         captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE")
         self.captcha_auto_var.set(captcha_auto != "false")
+        # Base Store Folder
+        base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER")
+        if base_folder:
+            self.base_folder_var.set(base_folder)
 
     def _save(self):
         # Save API Key
@@ -61,4 +80,8 @@ class SettingsDialog(ttk.Frame):
             db.set_config("GEMINI_API_KEY", key)
         # Save Captcha Auto-Solve
         db.set_config("CAPTCHA_AUTO_SOLVE", "true" if self.captcha_auto_var.get() else "false")
+        # Save Base Store Folder
+        base_folder = self.base_folder_var.get().strip()
+        if base_folder:
+            db.set_config("LOCAL_BASE_STORE_FOLDER", base_folder)
         messagebox.showinfo("설정", "저장되었습니다.")

@@ -1,4 +1,6 @@
 import time
+import os
+import re
 import threading
 import concurrent.futures
 import random
@@ -17,13 +19,15 @@ from core.captcha_solver import GeminiSolver
 from core.downloader import ImageDownloader
 
 class CrawlerEngine:
-    def __init__(self, download_path: str, num_download_threads: int = 2, captcha_auto_solve: bool = True):
+    def __init__(self, download_path: str, num_download_threads: int = 2, captcha_auto_solve: bool = True, base_store_folder: str = None):
         """
         :param download_path: Path to save downloaded files
         :param num_download_threads: Number of WORKER TABS to open (Parallel Browsing)
         :param captcha_auto_solve: Whether to use Gemini API for captcha solving
+        :param base_store_folder: Base folder for auto-folder creation when download_path is empty
         """
         self.download_path = download_path
+        self.base_store_folder = base_store_folder
         self.num_workers = num_download_threads
         self.captcha_auto_solve = captcha_auto_solve
         self.driver = None
@@ -36,6 +40,24 @@ class CrawlerEngine:
         self.downloader = ImageDownloader(max_threads=2) 
         
         self.is_running = False
+
+    @staticmethod
+    def _sanitize_folder_name(name: str) -> str:
+        """폴더명에 부적절한 문자를 제거/치환하여 안전한 폴더명 반환"""
+        if not name:
+            return "untitled"
+        # 1. 제어문자 및 개행 제거
+        name = re.sub(r'[\x00-\x1f\x7f]', '', name)
+        # 2. Windows/Linux 파일시스템 금지 문자 치환
+        name = re.sub(r'[\\/:*?"<>|]', '_', name)
+        # 3. 연속 언더스코어/공백 정리
+        name = re.sub(r'[_\s]+', ' ', name).strip()
+        # 4. 선두/말미 점(.) 제거 (Windows 예약)
+        name = name.strip('. ')
+        # 5. 폴더명 길이 제한 (NTFS 최대 255자)
+        if len(name) > 200:
+            name = name[:200]
+        return name if name else "untitled"
 
     def start(self, target_url: str):
         """단일 URL 크롤링. 완료 후 브라우저를 닫습니다."""
@@ -89,6 +111,21 @@ class CrawlerEngine:
         if not episode_list:
             logger.warning("No episodes found or failed to parse list.")
             return
+
+        # Auto-resolve download path if not explicitly set
+        effective_path = self.download_path
+        if (not effective_path or effective_path == "downloaded_files") and self.base_store_folder:
+            safe_title = self._sanitize_folder_name(list_title)
+            if safe_title:
+                effective_path = os.path.join(self.base_store_folder, safe_title)
+                os.makedirs(effective_path, exist_ok=True)
+                logger.info(f"Auto-created download folder: {effective_path}")
+            else:
+                effective_path = self.base_store_folder
+        
+        # Use effective_path for this URL
+        original_path = self.download_path
+        self.download_path = effective_path
 
         parsed_uri = urlparse(target_url)
         list_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}{parsed_uri.path}'
@@ -148,6 +185,8 @@ class CrawlerEngine:
         finally:
             # 워커 탭 정리 (메인 탭만 남기기)
             self._close_worker_tabs(worker_tabs)
+            # 배치 모드를 위해 download_path 원복
+            self.download_path = original_path
 
         logger.info("Crawling Finished.")
 
@@ -328,7 +367,7 @@ class CrawlerEngine:
         if not images:
             return False
 
-        safe_title = "".join([c for c in episode_title if c.isalnum() or c in (' ', '-', '_')]).strip()
+        safe_title = self._sanitize_folder_name(episode_title)
         save_dir = f"{self.download_path}/{safe_title}"
         
         success_count, total = self.downloader.download_chapter_images(images, save_dir, referer, self.stop_event)

@@ -49,7 +49,7 @@ class MainWindow(tk.Tk):
         
         menu_items = [
             ("🏠 수집 메인", self._show_dashboard),
-            ("🆕 최신 목록", self._show_latest_updates),
+            ("🆕 선택 크롤링", self._show_latest_updates),
             ("📁 DB 확인", self._show_db_viewer),
             ("⚙️ 기본 설정", self._show_settings),
         ]
@@ -299,7 +299,8 @@ class MainWindow(tk.Tk):
         try: threads = int(self.threads_var.get())
         except: threads = 2
         captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto)
+        base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER") or ""
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto, base_store_folder=base_folder)
         self._toggle_ui(running=True)
 
         def run_batch():
@@ -323,7 +324,8 @@ class MainWindow(tk.Tk):
             except: pass
 
         captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
-        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto)
+        base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER") or ""
+        self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto, base_store_folder=base_folder)
         self._toggle_ui(running=True)
         self.engine_thread = threading.Thread(target=self.engine.start, args=(url,), daemon=True)
         self.engine_thread.start()
