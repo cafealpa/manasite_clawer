@@ -9,3 +9,4 @@ __pycache__/
 *$py.class
 
 PROJECT_ANALYSIS.md
+src/crawled_pages.db

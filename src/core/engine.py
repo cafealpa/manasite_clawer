@@ -38,63 +38,90 @@ class CrawlerEngine:
         self.is_running = False
 
     def start(self, target_url: str):
+        """단일 URL 크롤링. 완료 후 브라우저를 닫습니다."""
         self.stop_event.clear()
         self.is_running = True
         logger.info(f"Starting crawler for: {target_url} with {self.num_workers} worker tabs")
 
         try:
             self._init_driver()
-            
-            # 1. Get Episode List (using Main Tab)
-            episode_list, list_title = self._get_episode_list(target_url)
-            if not episode_list:
-                logger.warning("No episodes found or failed to parse list.")
-                return
+            self._crawl_single_url(target_url)
+        except Exception as e:
+            logger.error(f"Critical Error in Engine: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            self.stop()
 
-            parsed_uri = urlparse(target_url)
-            list_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}{parsed_uri.path}'
-            db.upsert_mana_list(list_url, list_title, self.download_path)
+    def start_batch(self, url_list: list):
+        """여러 URL을 하나의 브라우저 세션으로 순차 크롤링합니다."""
+        self.stop_event.clear()
+        self.is_running = True
+        total = len(url_list)
+        logger.info(f"Starting BATCH crawl for {total} URLs with {self.num_workers} worker tabs")
 
-            total_episodes = len(episode_list)
-            logger.info(f"Found {total_episodes} episodes.")
+        try:
+            self._init_driver()
+            for idx, url in enumerate(url_list):
+                if self.stop_event.is_set():
+                    logger.info("Batch crawl stopped by user.")
+                    break
+                logger.info(f"=== Batch [{idx+1}/{total}] Starting: {url} ===")
+                try:
+                    self._crawl_single_url(url)
+                except Exception as e:
+                    logger.error(f"Error crawling {url}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                logger.info(f"=== Batch [{idx+1}/{total}] Done ===")
+            logger.info("Batch Crawling Finished.")
+        except Exception as e:
+            logger.error(f"Critical Error in Batch Engine: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            self.stop()
 
-            # Filter already crawled
-            to_crawl = []
-            for url in episode_list:
-                if not db.is_url_crawled(url):
-                    to_crawl.append(url)
-            
-            logger.info(f"Episodes to crawl: {len(to_crawl)} (Excluded {total_episodes - len(to_crawl)} already crawled)")
-            
-            if not to_crawl:
-                logger.info("Nothing to crawl.")
-                return
+    def _crawl_single_url(self, target_url: str):
+        """단일 URL에 대한 크롤링 핵심 로직. 브라우저는 건드리지 않습니다."""
+        # 1. Get Episode List (using Main Tab)
+        episode_list, list_title = self._get_episode_list(target_url)
+        if not episode_list:
+            logger.warning("No episodes found or failed to parse list.")
+            return
 
-            # 2. Prepare Worker Tabs
-            worker_tabs = self._create_worker_tabs(self.num_workers)
-            if not worker_tabs:
-                logger.error("Failed to create worker tabs.")
-                return
+        parsed_uri = urlparse(target_url)
+        list_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}{parsed_uri.path}'
+        db.upsert_mana_list(list_url, list_title, self.download_path)
 
-            # 3. Distribute Work and Start Threads
-            # We use a simple distribution or a shared queue. A shared queue is better for load balancing.
-            # But straightforward chunking is easier to verify. Let's use concurrent.futures map or manual threads.
-            # Since we need to assign a SPECIFIC TAB to a SPECIFIC THREAD, we cannot use simple ThreadPoolExecutor easily 
-            # without managing thread-local storage or passing the tab handle explicitely.
-            # We will use ThreadPoolExecutor and pass the tab handle as an argument.
+        total_episodes = len(episode_list)
+        logger.info(f"Found {total_episodes} episodes.")
 
-            # Partition tasks for workers? No, let's use a shared index or queue.
-            # Actually, `concurrent.futures` is good, but we need N persistent threads, each holding 1 tab.
-            # If we just submit tasks, a thread might get different tabs if we aren't careful.
-            # Better approach: 
-            # - Create N queues. Distribute URLs to queues.
-            # - Start N threads, each consuming one queue and using one fixed tab.
-            
-            worker_queues = [[] for _ in range(len(worker_tabs))]
-            for i, url in enumerate(to_crawl):
-                worker_idx = i % len(worker_tabs)
-                worker_queues[worker_idx].append(url)
+        # Filter already crawled
+        to_crawl = []
+        for url in episode_list:
+            if not db.is_url_crawled(url):
+                to_crawl.append(url)
+        
+        logger.info(f"Episodes to crawl: {len(to_crawl)} (Excluded {total_episodes - len(to_crawl)} already crawled)")
+        
+        if not to_crawl:
+            logger.info("Nothing to crawl.")
+            return
 
+        # 2. Prepare Worker Tabs
+        worker_tabs = self._create_worker_tabs(self.num_workers)
+        if not worker_tabs:
+            logger.error("Failed to create worker tabs.")
+            return
+
+        # 3. Distribute Work and Start Threads
+        worker_queues = [[] for _ in range(len(worker_tabs))]
+        for i, url in enumerate(to_crawl):
+            worker_idx = i % len(worker_tabs)
+            worker_queues[worker_idx].append(url)
+
+        try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(worker_tabs)) as executor:
                 futures = []
                 for i, tab_handle in enumerate(worker_tabs):
@@ -113,21 +140,32 @@ class CrawlerEngine:
                         )
                     )
                 
-                # Wait for all to complete
                 for future in concurrent.futures.as_completed(futures):
                     try:
                         future.result()
                     except Exception as e:
                         logger.error(f"Worker thread failed: {e}")
-
-            logger.info("Crawling Finished.")
-
-        except Exception as e:
-            logger.error(f"Critical Error in Engine: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
         finally:
-            self.stop()
+            # 워커 탭 정리 (메인 탭만 남기기)
+            self._close_worker_tabs(worker_tabs)
+
+        logger.info("Crawling Finished.")
+
+    def _close_worker_tabs(self, worker_tabs):
+        """워커 탭들을 닫고 메인 탭으로 전환"""
+        try:
+            main_tab = self.driver.window_handles[0]
+            for tab in worker_tabs:
+                try:
+                    if tab in self.driver.window_handles:
+                        self.driver.switch_to.window(tab)
+                        self.driver.close()
+                except Exception:
+                    pass
+            if main_tab in self.driver.window_handles:
+                self.driver.switch_to.window(main_tab)
+        except Exception as e:
+            logger.warning(f"Error closing worker tabs: {e}")
 
     def stop(self):
         self.is_running = False

@@ -24,6 +24,7 @@ class MainWindow(tk.Tk):
         self.url_var = tk.StringVar()
         self.path_var = tk.StringVar(value="downloaded_files")
         self.threads_var = tk.StringVar(value="2")
+        self._status_counter = 0  # For throttling status refresh
         
         # Persistent log area to keep logs when switching views
         self.log_area_persistent = scrolledtext.ScrolledText(None, state='disabled')
@@ -63,14 +64,50 @@ class MainWindow(tk.Tk):
         ttk.Button(self.sidebar, text="About", command=self._show_about).pack(fill='x')
         ttk.Button(self.sidebar, text="종료", command=self._on_close).pack(fill='x', pady=4)
 
-        # 3. Initial View
+        # 3. Status Area (bottom of sidebar)
+        status_frame = ttk.LabelFrame(self.sidebar, text="상태", padding=5)
+        status_frame.pack(side='bottom', fill='x', pady=(10, 0))
+
+        self.status_captcha_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
+        self.status_captcha_label.pack(anchor='w')
+        self.status_apikey_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
+        self.status_apikey_label.pack(anchor='w')
+        self.status_engine_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
+        self.status_engine_label.pack(anchor='w')
+
+        self._refresh_status()
+
+        # 4. Initial View
         self._show_dashboard()
+
+    def _refresh_status(self):
+        """사이드바 상태 영역 갱신"""
+        # Captcha auto-solve
+        captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
+        self.status_captcha_label.config(
+            text=f"🤖 캡챠: {'자동' if captcha_auto else '수동'}",
+            foreground='green' if captcha_auto else 'orange'
+        )
+        # API Key
+        api_key = db.get_config("GEMINI_API_KEY")
+        has_key = bool(api_key and api_key != "YOUR_API_KEY")
+        self.status_apikey_label.config(
+            text=f"🔑 API 키: {'설정됨' if has_key else '미설정'}",
+            foreground='green' if has_key else 'red'
+        )
+        # Engine
+        running = self.engine and self.engine.is_running
+        self.status_engine_label.config(
+            text=f"⚙️ 엔진: {'실행중' if running else '대기'}",
+            foreground='blue' if running else 'gray'
+        )
 
     def _show_view(self, view_frame):
         if self.current_view:
             self.current_view.destroy()
         self.current_view = view_frame
         self.current_view.pack(fill='both', expand=True)
+        self._refresh_status()
 
     def _show_dashboard(self):
         frame = ttk.Frame(self.content_container)
@@ -177,6 +214,9 @@ class MainWindow(tk.Tk):
                 self._toggle_ui(running=False)
 
         self.after(100, self._process_queue)
+        self._status_counter += 1
+        if self._status_counter % 20 == 0:  # ~2초마다 갱신
+            self._refresh_status()
 
     def _append_log(self, text):
         # Update persistent store
@@ -254,21 +294,18 @@ class MainWindow(tk.Tk):
         if not selected_urls:
             messagebox.showinfo("알림", "크롤링할 항목을 선택해주세요.")
             return
-        def run_batch():
-            for url in selected_urls:
-                if self.engine and self.engine.is_running: break
-                self._start_crawling_for_url(url)
-            self._toggle_ui(running=False)
-        threading.Thread(target=run_batch, daemon=True).start()
-
-    def _start_crawling_for_url(self, url: str):
+        
         path = self.path_var.get()
         try: threads = int(self.threads_var.get())
         except: threads = 2
         captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
         self.engine = CrawlerEngine(download_path=path, num_download_threads=threads, captcha_auto_solve=captcha_auto)
         self._toggle_ui(running=True)
-        self.engine.start(url)
+
+        def run_batch():
+            self.engine.start_batch(selected_urls)
+            self._toggle_ui(running=False)
+        threading.Thread(target=run_batch, daemon=True).start()
 
     def _start_crawling(self):
         url = self.url_var.get().strip()
