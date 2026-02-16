@@ -47,4 +47,8 @@ class ManatokiParser(BaseParser):
         return images
 
     def is_captcha_page(self, current_url: str, html_source: str) -> bool:
-        return "bbs/captcha.php" in current_url
+        if "bbs/captcha.php" in current_url:
+            return True
+        if html_source and "kcaptcha_image.php" in html_source:
+            return True
+        return False

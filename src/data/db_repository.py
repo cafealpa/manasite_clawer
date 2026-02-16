@@ -1,10 +1,11 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from typing import Optional, List
 from utils.config import config_manager
 from utils.logger import logger
 
-DB_FILE = 'crawled_pages.db'
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'crawled_pages.db')
 
 class DBRepository:
     def __init__(self, db_path=DB_FILE):
@@ -28,6 +29,7 @@ class DBRepository:
         if not self._initialized:
             self._initialize_db()
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
         finally:
@@ -39,12 +41,22 @@ class DBRepository:
         try:
             cursor = conn.cursor()
             cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mana_lists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mana_list_url TEXT NOT NULL UNIQUE,
+                    mana_title TEXT,
+                    local_store_path TEXT
+                )
+            """)
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS crawled_urls (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     url TEXT NOT NULL UNIQUE,
                     page_title TEXT,
                     list_url TEXT,
-                    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    mana_list_id INTEGER,
+                    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mana_list_id) REFERENCES mana_lists(id)
                 )
             """)
             cursor.execute("""
@@ -69,6 +81,33 @@ class DBRepository:
                 conn.commit()
             except sqlite3.OperationalError:
                 # Column likely already exists
+                pass
+            try:
+                cursor.execute("ALTER TABLE crawled_urls ADD COLUMN mana_list_id INTEGER")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE mana_lists ADD COLUMN local_store_path TEXT")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO mana_lists (mana_list_url)
+                    SELECT DISTINCT list_url
+                    FROM crawled_urls
+                    WHERE list_url IS NOT NULL AND list_url != ''
+                """)
+                cursor.execute("""
+                    UPDATE crawled_urls
+                    SET mana_list_id = (
+                        SELECT id FROM mana_lists WHERE mana_lists.mana_list_url = crawled_urls.list_url
+                    )
+                    WHERE mana_list_id IS NULL AND list_url IS NOT NULL AND list_url != ''
+                """)
+                conn.commit()
+            except sqlite3.OperationalError:
                 pass
         finally:
             conn.close()
@@ -100,16 +139,61 @@ class DBRepository:
             cursor.execute("SELECT 1 FROM crawled_urls WHERE url = ?", (url,))
             return cursor.fetchone() is not None
 
-    def add_crawled_url(self, url: str, page_title: str, list_url: str = None):
+    def _get_or_create_mana_list(
+        self,
+        mana_list_url: str,
+        mana_title: str = None,
+        local_store_path: str = None,
+    ) -> Optional[int]:
+        if not mana_list_url:
+            return None
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO mana_lists (mana_list_url, mana_title, local_store_path) VALUES (?, ?, ?)",
+                (mana_list_url, mana_title, local_store_path)
+            )
+            if mana_title:
+                cursor.execute(
+                    "UPDATE mana_lists SET mana_title = ? WHERE mana_list_url = ? AND (mana_title IS NULL OR mana_title != ?)",
+                    (mana_title, mana_list_url, mana_title)
+                )
+            if local_store_path:
+                cursor.execute(
+                    "UPDATE mana_lists SET local_store_path = ? WHERE mana_list_url = ? AND (local_store_path IS NULL OR local_store_path != ?)",
+                    (local_store_path, mana_list_url, local_store_path)
+                )
+            conn.commit()
+            cursor.execute("SELECT id FROM mana_lists WHERE mana_list_url = ?", (mana_list_url,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def add_crawled_url(
+        self,
+        url: str,
+        page_title: str,
+        list_url: str = None,
+        list_title: str = None,
+        local_store_path: str = None,
+    ):
+        mana_list_id = self._get_or_create_mana_list(list_url, list_title, local_store_path)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("INSERT INTO crawled_urls (url, page_title, list_url) VALUES (?, ?, ?)", (url, page_title, list_url))
+                cursor.execute(
+                    "INSERT INTO crawled_urls (url, page_title, list_url, mana_list_id) VALUES (?, ?, ?, ?)",
+                    (url, page_title, list_url, mana_list_id)
+                )
                 conn.commit()
                 # logger.debug(f"DB Saved: {url}")
-            except sqlite3.IntegrityError:
-                # logger.debug(f"DB Duplicate ignored: {url}")
-                pass
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE" in str(e):
+                    logger.debug(f"DB Duplicate ignored: {url}")
+                else:
+                    logger.error(f"DB Insert failed for {url}: {e}")
+
+    def upsert_mana_list(self, mana_list_url: str, mana_title: str = None, local_store_path: str = None):
+        self._get_or_create_mana_list(mana_list_url, mana_title, local_store_path)
 
     def delete_crawled_urls(self, ids: List[int]) -> int:
         if not ids:
@@ -133,6 +217,18 @@ class DBRepository:
             query += " ORDER BY crawled_at DESC"
             
             cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def get_latest_mana_lists(self) -> List[tuple]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ml.mana_list_url, ml.mana_title, MAX(cu.crawled_at) AS last_crawled
+                FROM crawled_urls cu
+                JOIN mana_lists ml ON ml.id = cu.mana_list_id
+                GROUP BY ml.id, ml.mana_list_url, ml.mana_title
+                ORDER BY last_crawled DESC
+            """)
             return cursor.fetchall()
 
 # Global Repository Instance

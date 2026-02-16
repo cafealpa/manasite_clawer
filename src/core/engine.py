@@ -17,7 +17,7 @@ from core.captcha_solver import GeminiSolver
 from core.downloader import ImageDownloader
 
 class CrawlerEngine:
-    def __init__(self, download_path: str, num_download_threads: int = 4):
+    def __init__(self, download_path: str, num_download_threads: int = 2):
         """
         :param download_path: Path to save downloaded files
         :param num_download_threads: Number of WORKER TABS to open (Parallel Browsing)
@@ -25,6 +25,9 @@ class CrawlerEngine:
         self.download_path = download_path
         self.num_workers = num_download_threads  # Interpret as number of browser tabs
         self.driver = None
+        # 브라우저 동기화 설정
+        # 메모리 절약 및 봇 탐지 우회(UC 모드)를 일관되게 유지하기 위해 단일 드라이버 인스턴스를 공유합니다.
+        # Selenium의 WebDriver는 스레드 안전(thread-safe)하지 않으므로 threading.Lock이 필수적입니다.
         self.driver_lock = threading.Lock()
         self.stop_event = threading.Event()
         
@@ -32,7 +35,7 @@ class CrawlerEngine:
         self.parser = ManatokiParser()
         self.captcha_solver = GeminiSolver()
         # Downloader internal threads can be kept low since we have N page workers
-        self.downloader = ImageDownloader(max_threads=4) 
+        self.downloader = ImageDownloader(max_threads=2) 
         
         self.is_running = False
 
@@ -45,10 +48,14 @@ class CrawlerEngine:
             self._init_driver()
             
             # 1. Get Episode List (using Main Tab)
-            episode_list = self._get_episode_list(target_url)
+            episode_list, list_title = self._get_episode_list(target_url)
             if not episode_list:
                 logger.warning("No episodes found or failed to parse list.")
                 return
+
+            parsed_uri = urlparse(target_url)
+            list_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}{parsed_uri.path}'
+            db.upsert_mana_list(list_url, list_title, self.download_path)
 
             total_episodes = len(episode_list)
             logger.info(f"Found {total_episodes} episodes.")
@@ -103,7 +110,8 @@ class CrawlerEngine:
                             worker_id=i+1, 
                             tab_handle=tab_handle, 
                             urls=urls_for_worker, 
-                            main_url=target_url
+                            main_url=target_url,
+                            list_title=list_title
                         )
                     )
                 
@@ -150,7 +158,7 @@ class CrawlerEngine:
                 self.driver.get(target_url)
                 
                 # Check for Captcha on List Page
-                if self.parser.is_captcha_page(self.driver.current_url, ""):
+                if self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
                     logger.info("Captcha detected on List Page. Solving...")
                     self._handle_captcha(worker_id=0)
                 
@@ -158,10 +166,10 @@ class CrawlerEngine:
                      EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
                 )
                 html = self.driver.page_source
-                return self.parser.get_episode_urls(html)
+                return self.parser.get_episode_urls(html), self.parser.get_title(html)
             except Exception as e:
                 logger.error(f"Error getting episode list: {e}")
-                return []
+                return [], ""
 
     def _create_worker_tabs(self, count: int):
         created_tabs = []
@@ -191,7 +199,7 @@ class CrawlerEngine:
             
         return created_tabs
 
-    def _worker_loop(self, worker_id: int, tab_handle: str, urls: list, main_url: str):
+    def _worker_loop(self, worker_id: int, tab_handle: str, urls: list, main_url: str, list_title: str = ""):
         logger.info(f"Worker {worker_id} started. Tasks: {len(urls)}")
         
         parsed_uri = urlparse(main_url)
@@ -206,7 +214,7 @@ class CrawlerEngine:
             
             success = False
             try:
-                success = self._process_single_episode(worker_id, tab_handle, url, referer, list_url)
+                success = self._process_single_episode(worker_id, tab_handle, url, referer, list_url, list_title)
             except Exception as e:
                 logger.error(f"Worker {worker_id} error processing {url}: {e}")
             
@@ -218,7 +226,7 @@ class CrawlerEngine:
 
         logger.info(f"Worker {worker_id} finished.")
 
-    def _process_single_episode(self, worker_id: int, tab_handle: str, episode_url: str, referer: str, list_url: str = None) -> bool:
+    def _process_single_episode(self, worker_id: int, tab_handle: str, episode_url: str, referer: str, list_url: str = None, list_title: str = "") -> bool:
         images = []
         episode_title = ""
         
@@ -238,10 +246,19 @@ class CrawlerEngine:
             return False
 
         # --- Processing Phase ---
-        # 1. Removed Captcha Check (Moved to List Page)
-        # Assuming session is clean or captcha is handled by main thread logic if needed.
-        # If captcha appears here, it's problematic for parallel workers anyway.
+        # 1. Captcha Check
+        with self.driver_lock:
+            try:
+                self.driver.switch_to.window(tab_handle)
+                if self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
+                    logger.info(f"Worker {worker_id}: Captcha detected on Episode Page. Solving...")
+                    self._handle_captcha(worker_id=worker_id)
+            except Exception as e:
+                logger.error(f"Worker {worker_id} captcha check error: {e}")
 
+        # Re-wait after captcha solve if necessary
+        if not self._wait_for_page_load(worker_id, tab_handle):
+            return False
 
         # 2. Scroll (Interleaved Locking)
         self._scroll_down(worker_id, tab_handle)
@@ -281,7 +298,7 @@ class CrawlerEngine:
         # This ensures we don't get stuck processing the same broken episode forever.
         
         # User request: Add list_url (address before ?) to DB
-        db.add_crawled_url(episode_url, episode_title, list_url)
+        db.add_crawled_url(episode_url, episode_title, list_url, list_title, self.download_path)
         
         if success_count > 0:
             logger.info(f"Worker {worker_id} [{episode_title}] Downloaded {success_count}/{total}")
@@ -318,8 +335,12 @@ class CrawlerEngine:
 
     def _scroll_down(self, worker_id: int, tab_handle: str):
         """
-        Scrolls down incrementally to trigger lazy loading.
-        Uses granular locking to allow other threads to interleave.
+        지연 로딩(lazy loading)을 트리거하기 위해 단계적으로 스크롤을 내립니다.
+        
+        왜 인터리브 락킹(Interleaved Locking)을 사용하나요?
+        긴 스크롤 과정 동안 락(lock)을 계속 잡고 있으면 다른 워커 탭들이 완전히 차단됩니다.
+        루프의 각 반복에서 락을 획득하고 해제함으로써, 이 스레드가 다음 스크롤 단계나 
+        네트워크 응답을 기다리는 동안 다른 스레드가 페이지 이동이나 파싱 작업을 수행할 수 있도록 합니다.
         """
         max_scrolls = 100 # Safety limit
         scroll_count = 0
@@ -390,10 +411,14 @@ class CrawlerEngine:
             scroll_count += 1
 
     def _handle_captcha(self, worker_id: int):
+        # 왜 이 방식을 사용하나요?
+        # URL을 통해 직접 이미지를 다운로드하는 대신 엘리먼트 스크린샷을 사용합니다.
+        # 이는 새로운 캡차 생성을 유발하거나 세션 불일치가 발생하는 것을 방지하기 위함입니다.
+        # 최대 재시도 횟수는 무한 루프와 API 비용 과다 발생을 막기 위해 제한됩니다.
         # Assumes LOCK is HELD
         max_retries = 3
         for i in range(max_retries):
-            if not self.parser.is_captcha_page(self.driver.current_url, ""):
+            if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
                 return
 
             logger.warning(f"Worker {worker_id}: Captcha detected. Attempt {i+1}")
@@ -418,7 +443,7 @@ class CrawlerEngine:
                     # But keeping it simple:
                     time.sleep(1)
                     
-                    if not self.parser.is_captcha_page(self.driver.current_url, ""):
+                    if not self.parser.is_captcha_page(self.driver.current_url, self.driver.page_source):
                         logger.info(f"Worker {worker_id}: Captcha Solved!")
                         return
                     else:
