@@ -1,3 +1,4 @@
+import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
@@ -6,9 +7,11 @@ from ui.image_viewer import ImageViewer
 from utils.logger import logger
 from core.engine import CrawlerEngine
 
-class DBViewer(ttk.Frame):
+FONT_FAMILY = "Malgun Gothic"
+
+class DBViewer(ctk.CTkFrame):
     def __init__(self, master):
-        super().__init__(master)
+        super().__init__(master, fg_color="transparent")
         
         self.check_vars = {}
         self._create_widgets()
@@ -16,36 +19,45 @@ class DBViewer(ttk.Frame):
 
     def _create_widgets(self):
         # --- Top Frames ---
-        top_frame = ttk.Frame(self)
+        top_frame = ctk.CTkFrame(self, fg_color="transparent")
         top_frame.pack(pady=(10, 0), padx=10, fill='x', expand=False)
 
-        search_frame = ttk.Frame(top_frame)
+        search_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         search_frame.pack(fill='x', expand=True)
 
-        search_label = ttk.Label(search_frame, text="제목 검색:")
-        search_label.pack(side='left', padx=(0, 5))
-        self.search_entry = ttk.Entry(search_frame, width=40)
+        ctk.CTkLabel(search_frame, text="제목 검색:", font=ctk.CTkFont(family=FONT_FAMILY)).pack(side='left', padx=(0, 5))
+        self.search_entry = ctk.CTkEntry(search_frame, width=300, font=ctk.CTkFont(family=FONT_FAMILY))
         self.search_entry.pack(side='left', fill='x', expand=True)
         self.search_entry.bind("<Return>", self.search_data)
-        search_button = ttk.Button(search_frame, text="검색", command=self.search_data)
-        search_button.pack(side='left', padx=5)
+        ctk.CTkButton(search_frame, text="검색", command=self.search_data, width=60, font=ctk.CTkFont(family=FONT_FAMILY)).pack(side='left', padx=5)
 
-        refresh_button = ttk.Button(search_frame, text="새로고침", command=self.refresh_data)
-        refresh_button.pack(side='left', padx=5)
+        ctk.CTkButton(search_frame, text="새로고침", command=self.refresh_data, width=80, font=ctk.CTkFont(family=FONT_FAMILY)).pack(side='left', padx=5)
 
-        action_frame = ttk.Frame(top_frame)
-        action_frame.pack(fill='x', expand=True, pady=(5,0))
+        action_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        action_frame.pack(fill='x', expand=True, pady=(10,0))
 
-        delete_button = ttk.Button(action_frame, text="선택삭제", command=self.delete_selected)
-        delete_button.pack(side='left')
+        ctk.CTkButton(action_frame, text="선택삭제", command=self.delete_selected, fg_color="#D32F2F", hover_color="#C62828", font=ctk.CTkFont(family=FONT_FAMILY)).pack(side='left')
         
-        ttk.Label(action_frame, text="* 항목을 더블클릭하면 뷰어를 엽니다.", foreground='gray').pack(side='right')
+        ctk.CTkLabel(action_frame, text="* 항목을 더블클릭하면 뷰어를 엽니다.", text_color="gray", font=ctk.CTkFont(family=FONT_FAMILY)).pack(side='right')
 
         # --- Treeview Frame ---
-        tree_frame = ttk.Frame(self)
+        tree_frame = ctk.CTkFrame(self)
         tree_frame.pack(pady=10, padx=10, fill='both', expand=True)
 
-        # --- Treeview ---
+        # --- Treeview (Standard ttk) ---
+        # CustomTkinter doesn't have a Treeview, so we style the standard one
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview", 
+                        background="#2b2b2b", 
+                        foreground="white", 
+                        fieldbackground="#2b2b2b", 
+                        borderwidth=0,
+                        font=(FONT_FAMILY, 10))
+        style.map('Treeview', background=[('selected', '#1f538d')])
+        style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat", font=(FONT_FAMILY, 10, "bold"))
+        style.map("Treeview.Heading", background=[('active', '#333333')])
+
         self.tree = ttk.Treeview(tree_frame, columns=("Select", "ID", "Page Title", "Crawled At", "URL"), show='headings')
         
         # Setup Headings with Sort Command
@@ -214,7 +226,7 @@ class DBViewer(ttk.Frame):
                 messagebox.showerror("데이터베이스 오류", f"삭제 중 오류가 발생했습니다: {e}")
 
 if __name__ == '__main__':
-    root = tk.Tk()
+    root = ctk.CTk()
     root.withdraw()  # 메인 창 숨기기
     app = DBViewer(root)
     root.mainloop()

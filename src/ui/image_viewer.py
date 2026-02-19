@@ -1,12 +1,13 @@
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import os
 import time
 from PIL import Image, ImageTk
 from data.db_repository import db
 from core.engine import CrawlerEngine
 
-class ImageViewer(tk.Toplevel):
+class ImageViewer(ctk.CTkToplevel):
     def __init__(self, parent, folder_path, title="Image Viewer", current_db_id=None):
         super().__init__(parent)
         self.title(f"Viewer - {title}")
@@ -23,7 +24,7 @@ class ImageViewer(tk.Toplevel):
         self.fit_mode = True  # Default to Fit to Window
         
         if not self.image_files:
-            ttk.Label(self, text="이미지를 찾을 수 없습니다.", font=("Helvetica", 14)).pack(expand=True)
+            ctk.CTkLabel(self, text="이미지를 찾을 수 없습니다.", font=("Helvetica", 14)).pack(expand=True)
             return
 
         self._create_widgets()
@@ -44,16 +45,19 @@ class ImageViewer(tk.Toplevel):
 
     def _create_widgets(self):
         # Main container
-        self.main_frame = ttk.Frame(self)
+        self.main_frame = ctk.CTkFrame(self)
         self.main_frame.pack(fill='both', expand=True)
 
         # Canvas for image with scrollbars
-        self.canvas_frame = ttk.Frame(self.main_frame)
+        self.canvas_frame = ctk.CTkFrame(self.main_frame)
         self.canvas_frame.pack(side='top', fill='both', expand=True)
 
-        self.canvas = tk.Canvas(self.canvas_frame, bg='black')
-        self.v_scroll = ttk.Scrollbar(self.canvas_frame, orient='vertical', command=self.canvas.yview)
-        self.h_scroll = ttk.Scrollbar(self.canvas_frame, orient='horizontal', command=self.canvas.xview)
+        # Use standard Canvas for image display as CTk doesn't have a direct replacement with scrollbars
+        self.canvas = tk.Canvas(self.canvas_frame, bg='#2b2b2b', highlightthickness=0)
+        
+        # Custom Scrollbars
+        self.v_scroll = ctk.CTkScrollbar(self.canvas_frame, orientation='vertical', command=self.canvas.yview)
+        self.h_scroll = ctk.CTkScrollbar(self.canvas_frame, orientation='horizontal', command=self.canvas.xview)
         
         self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
         
@@ -62,46 +66,47 @@ class ImageViewer(tk.Toplevel):
         self.canvas.pack(side='left', fill='both', expand=True)
 
         # Bottom Control Container
-        self.bottom_frame = ttk.Frame(self.main_frame, padding=5)
-        self.bottom_frame.pack(side='bottom', fill='x')
+        self.bottom_frame = ctk.CTkFrame(self.main_frame, height=50)
+        self.bottom_frame.pack(side='bottom', fill='x', padx=5, pady=5)
 
         # Navigation Row
-        self.nav_frame = ttk.Frame(self.bottom_frame)
-        self.nav_frame.pack(side='top', fill='x')
+        self.nav_frame = ctk.CTkFrame(self.bottom_frame, fg_color="transparent")
+        self.nav_frame.pack(fill='x', padx=5, pady=5)
 
         # 1. Left Buttons
-        left_btn_frame = ttk.Frame(self.nav_frame)
+        left_btn_frame = ctk.CTkFrame(self.nav_frame, fg_color="transparent")
         left_btn_frame.pack(side='left')
         
-        ttk.Button(left_btn_frame, text="⏮ 이전 화", command=self._go_prev_episode).pack(side='left', padx=5)
-        ttk.Button(left_btn_frame, text="◀ 이전", command=self._prev_image).pack(side='left', padx=5)
+        ctk.CTkButton(left_btn_frame, text="⏮ 이전 화", command=self._go_prev_episode, width=80).pack(side='left', padx=2)
+        ctk.CTkButton(left_btn_frame, text="◀ 이전", command=self._prev_image, width=60).pack(side='left', padx=2)
 
         # 2. Right Buttons (Pack first to stay on right)
-        right_btn_frame = ttk.Frame(self.nav_frame)
+        right_btn_frame = ctk.CTkFrame(self.nav_frame, fg_color="transparent")
         right_btn_frame.pack(side='right')
         
-        ttk.Button(right_btn_frame, text="다음 ▶", command=self._next_image).pack(side='left', padx=5)
-        ttk.Button(right_btn_frame, text="다음 화 ⏭", command=self._go_next_episode).pack(side='left', padx=5)
+        ctk.CTkButton(right_btn_frame, text="다음 ▶", command=self._next_image, width=60).pack(side='left', padx=2)
+        ctk.CTkButton(right_btn_frame, text="다음 화 ⏭", command=self._go_next_episode, width=80).pack(side='left', padx=2)
 
         # 3. Zoom Controls (Pack right, next to right buttons)
-        zoom_frame = ttk.Frame(self.nav_frame)
+        zoom_frame = ctk.CTkFrame(self.nav_frame, fg_color="transparent")
         zoom_frame.pack(side='right', padx=10)
 
-        ttk.Button(zoom_frame, text="-", width=2, command=self._zoom_out).pack(side='left')
+        ctk.CTkButton(zoom_frame, text="-", width=30, command=self._zoom_out).pack(side='left', padx=2)
         
         self.scale_var = tk.DoubleVar(value=100.0)
         self.entry_var = tk.StringVar(value="100")
-        self.zoom_entry = ttk.Entry(zoom_frame, textvariable=self.entry_var, width=4, justify='center')
+        
+        self.zoom_entry = ctk.CTkEntry(zoom_frame, textvariable=self.entry_var, width=50, justify='center')
         self.zoom_entry.pack(side='left', padx=2)
         self.zoom_entry.bind("<Return>", self._on_entry_change)
         
-        ttk.Button(zoom_frame, text="+", width=2, command=self._zoom_in).pack(side='left')
-        ttk.Label(zoom_frame, text="%").pack(side='left', padx=(2, 5))
+        ctk.CTkButton(zoom_frame, text="+", width=30, command=self._zoom_in).pack(side='left', padx=2)
+        ctk.CTkLabel(zoom_frame, text="%").pack(side='left', padx=(2, 5))
         
-        ttk.Button(zoom_frame, text="원본", width=4, command=self._reset_zoom).pack(side='left')
+        ctk.CTkButton(zoom_frame, text="원본", width=50, command=self._reset_zoom).pack(side='left')
 
         # 4. Center Info (Pack last to fill remaining space)
-        self.info_label = ttk.Label(self.nav_frame, text="", anchor='center')
+        self.info_label = ctk.CTkLabel(self.nav_frame, text="", anchor='center')
         self.info_label.pack(side='left', fill='x', expand=True)
 
         # Bindings
@@ -198,10 +203,10 @@ class ImageViewer(tk.Toplevel):
             self.canvas.create_image(x_pos, y_pos, anchor='center', image=self.tk_img)
             self.canvas.config(scrollregion=(0, 0, new_width, new_height))
             
-            self.info_label.config(text=f"[{self.current_index + 1} / {len(self.image_files)}] {os.path.basename(img_path)}")
+            self.info_label.configure(text=f"[{self.current_index + 1} / {len(self.image_files)}] {os.path.basename(img_path)}")
             
         except Exception as e:
-            self.info_label.config(text=f"Error loading image: {e}")
+            self.info_label.configure(text=f"Error loading image: {e}")
 
     def _prev_image(self):
         if self.current_index > 0:
@@ -281,7 +286,7 @@ class ImageViewer(tk.Toplevel):
             
             if not self.image_files:
                 self.canvas.delete("all")
-                self.info_label.config(text="이미지를 찾을 수 없습니다.")
+                self.info_label.configure(text="이미지를 찾을 수 없습니다.")
             else:
                 self._show_image(calculate_fit=True)
         else:
@@ -291,10 +296,10 @@ class ImageViewer(tk.Toplevel):
         if hasattr(self, '_current_toast') and self._current_toast.winfo_exists():
             self._current_toast.destroy()
 
-        toast_frame = ttk.Frame(self, relief='solid', borderwidth=1)
+        toast_frame = ctk.CTkFrame(self, corner_radius=10)
         self._current_toast = toast_frame
         
-        label = ttk.Label(toast_frame, text=message, padding=(20, 10), background="#333333", foreground="#ffffff")
+        label = ctk.CTkLabel(toast_frame, text=message, padx=20, pady=10)
         label.pack()
         
         toast_frame.place(relx=0.5, rely=0.85, anchor='center')
