@@ -270,5 +270,103 @@ class DBRepository:
             """)
             return cursor.fetchall()
 
+    def get_next_episode(self, current_id: int) -> Optional[tuple]:
+        """
+        Finds the next episode in the same mana_list based on page_title order.
+        Uses the last number (including float and hyphen) in the title for sorting.
+        Returns (id, page_title) or None.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 1. Get current episode info
+            cursor.execute("SELECT mana_list_id, page_title FROM crawled_urls WHERE id = ?", (current_id,))
+            current = cursor.fetchone()
+            if not current:
+                return None
+            
+            mana_list_id, current_title = current
+            
+            # 2. Find all episodes in the same list
+            cursor.execute("""
+                SELECT id, page_title 
+                FROM crawled_urls 
+                WHERE mana_list_id = ?
+            """, (mana_list_id,))
+            
+            all_episodes = cursor.fetchall()
+            
+            # 3. Sort using last number (float aware, hyphen aware)
+            import re
+            def get_last_number(text):
+                # Find all numbers, including decimals (e.g., 12.5) or hyphens (e.g. 12-5)
+                matches = re.findall(r'\d+(?:[.-]\d+)?', text)
+                if not matches:
+                    return 0.0
+                try:
+                    return float(matches[-1].replace('-', '.'))
+                except ValueError:
+                    return 0.0
+            
+            # Sort by title
+            all_episodes.sort(key=lambda x: get_last_number(x[1]))
+            
+            # 4. Find current index and return next
+            for i, (ep_id, ep_title) in enumerate(all_episodes):
+                if ep_id == current_id:
+                    if i + 1 < len(all_episodes):
+                        return all_episodes[i+1]
+                    break
+            
+            return None
+
+    def get_prev_episode(self, current_id: int) -> Optional[tuple]:
+        """
+        Finds the previous episode in the same mana_list based on page_title order.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 1. Get current episode info
+            cursor.execute("SELECT mana_list_id, page_title FROM crawled_urls WHERE id = ?", (current_id,))
+            current = cursor.fetchone()
+            if not current:
+                return None
+            
+            mana_list_id, current_title = current
+            
+            # 2. Find all episodes in the same list
+            cursor.execute("""
+                SELECT id, page_title 
+                FROM crawled_urls 
+                WHERE mana_list_id = ?
+            """, (mana_list_id,))
+            
+            all_episodes = cursor.fetchall()
+            
+            # 3. Sort using last number (float aware, hyphen aware)
+            import re
+            def get_last_number(text):
+                # Find all numbers, including decimals (e.g., 12.5) or hyphens (e.g. 12-5)
+                matches = re.findall(r'\d+(?:[.-]\d+)?', text)
+                if not matches:
+                    return 0.0
+                try:
+                    return float(matches[-1].replace('-', '.'))
+                except ValueError:
+                    return 0.0
+            
+            # Sort by title
+            all_episodes.sort(key=lambda x: get_last_number(x[1]))
+            
+            # 4. Find current index and return prev
+            for i, (ep_id, ep_title) in enumerate(all_episodes):
+                if ep_id == current_id:
+                    if i > 0:
+                        return all_episodes[i-1]
+                    break
+            
+            return None
+
 # Global Repository Instance
 db = DBRepository()
