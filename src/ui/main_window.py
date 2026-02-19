@@ -1,5 +1,6 @@
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog
 import os
 import threading
 import queue
@@ -10,11 +11,20 @@ from ui.settings_dialog import SettingsDialog
 from db_viewer.db_viewer import DBViewer
 from data.db_repository import db
 
-class MainWindow(tk.Tk):
+# Set default theme
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
+
+FONT_FAMILY = "Malgun Gothic"
+
+class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Manatoki Crawler (Reborn)")
-        self.geometry("850x650") # Slightly wider for sidebar
+        self.geometry("900x700")
+        
+        # Set default font for standard tkinter widgets
+        self.option_add("*Font", f"{{{FONT_FAMILY}}} 10")
         
         self.msg_queue = queue.Queue()
         self.engine = None
@@ -30,7 +40,8 @@ class MainWindow(tk.Tk):
         self._status_counter = 0  # For throttling status refresh
         
         # Persistent log area to keep logs when switching views
-        self.log_area_persistent = scrolledtext.ScrolledText(None, state='disabled')
+        # Using CTkTextbox for logs
+        self.log_text_persistent = ""
         
         self._create_widgets()
         self._setup_logger()
@@ -40,15 +51,15 @@ class MainWindow(tk.Tk):
 
     def _create_widgets(self):
         # 1. Main Layout Containers
-        self.sidebar = ttk.Frame(self, width=170, padding=10)
+        self.sidebar = ctk.CTkFrame(self, width=180, corner_radius=0)
         self.sidebar.pack(side='left', fill='y')
         self.sidebar.pack_propagate(False)
 
-        self.content_container = ttk.Frame(self, padding=10)
+        self.content_container = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.content_container.pack(side='right', fill='both', expand=True)
 
         # 2. Sidebar Menu
-        ttk.Label(self.sidebar, text="MANATOKI\nCRAWLER", font=('Helvetica', 14, 'bold'), justify='center').pack(pady=(10, 30))
+        ctk.CTkLabel(self.sidebar, text="MANATOKI\nCRAWLER", font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold")).pack(pady=(20, 30))
         
         menu_items = [
             ("🏠 수집 메인", self._show_dashboard),
@@ -59,28 +70,29 @@ class MainWindow(tk.Tk):
         
         self.menu_buttons = {}
         for text, command in menu_items:
-            btn = ttk.Button(self.sidebar, text=text, command=command)
-            btn.pack(fill='x', pady=4)
+            btn = ctk.CTkButton(self.sidebar, text=text, command=command, fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"), anchor="w", font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+            btn.pack(fill='x', pady=4, padx=10)
             self.menu_buttons[text] = btn
 
-        ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', pady=20)
+        # Separator (simulated with frame)
+        ctk.CTkFrame(self.sidebar, height=2, fg_color="gray50").pack(fill='x', pady=20, padx=10)
         
         # Shortcut button
-        ttk.Button(self.sidebar, text="🌐 마나토끼 바로가기", command=self._open_manatoki).pack(fill='x', pady=4)
+        ctk.CTkButton(self.sidebar, text="🌐 마나토끼 바로가기", command=self._open_manatoki, fg_color="transparent", border_width=1, text_color=("gray10", "gray90"), font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(fill='x', pady=4, padx=10)
         
-        ttk.Button(self.sidebar, text="About", command=self._show_about).pack(fill='x')
-        ttk.Button(self.sidebar, text="종료", command=self._on_close).pack(fill='x', pady=4)
+        ctk.CTkButton(self.sidebar, text="About", command=self._show_about, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w", font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(fill='x', padx=10)
+        ctk.CTkButton(self.sidebar, text="종료", command=self._on_close, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w", font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(fill='x', pady=4, padx=10)
 
         # 3. Status Area (bottom of sidebar)
-        status_frame = ttk.LabelFrame(self.sidebar, text="상태", padding=5)
-        status_frame.pack(side='bottom', fill='x', pady=(10, 0))
+        status_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        status_frame.pack(side='bottom', fill='x', pady=20, padx=10)
 
-        self.status_captcha_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
-        self.status_captcha_label.pack(anchor='w')
-        self.status_apikey_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
-        self.status_apikey_label.pack(anchor='w')
-        self.status_engine_label = ttk.Label(status_frame, text="", font=('Helvetica', 9))
-        self.status_engine_label.pack(anchor='w')
+        self.status_captcha_label = ctk.CTkLabel(status_frame, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12), anchor="w")
+        self.status_captcha_label.pack(fill='x')
+        self.status_apikey_label = ctk.CTkLabel(status_frame, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12), anchor="w")
+        self.status_apikey_label.pack(fill='x')
+        self.status_engine_label = ctk.CTkLabel(status_frame, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12), anchor="w")
+        self.status_engine_label.pack(fill='x')
 
         self._refresh_status()
 
@@ -100,85 +112,95 @@ class MainWindow(tk.Tk):
         """사이드바 상태 영역 갱신"""
         # Captcha auto-solve
         captcha_auto = db.get_config("CAPTCHA_AUTO_SOLVE") != "false"
-        self.status_captcha_label.config(
+        self.status_captcha_label.configure(
             text=f"🤖 캡챠: {'자동' if captcha_auto else '수동'}",
-            foreground='green' if captcha_auto else 'orange'
+            text_color='green' if captcha_auto else 'orange'
         )
         # API Key
         api_key = db.get_config("GEMINI_API_KEY")
         has_key = bool(api_key and api_key != "YOUR_API_KEY")
-        self.status_apikey_label.config(
+        self.status_apikey_label.configure(
             text=f"🔑 API 키: {'설정됨' if has_key else '미설정'}",
-            foreground='green' if has_key else 'red'
+            text_color='green' if has_key else 'red'
         )
         # Engine
         running = self.engine and self.engine.is_running
-        self.status_engine_label.config(
+        self.status_engine_label.configure(
             text=f"⚙️ 엔진: {'실행중' if running else '대기'}",
-            foreground='blue' if running else 'gray'
+            text_color='#3B8ED0' if running else 'gray'
         )
 
     def _show_view(self, view_frame):
         if self.current_view:
             self.current_view.destroy()
         self.current_view = view_frame
-        self.current_view.pack(fill='both', expand=True)
+        self.current_view.pack(fill='both', expand=True, padx=20, pady=20)
         self._refresh_status()
 
     def _show_dashboard(self):
-        frame = ttk.Frame(self.content_container)
+        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         
         # 1. URL Input
-        url_frame = ttk.LabelFrame(frame, text="수집 대상", padding=10)
-        url_frame.pack(fill='x', pady=5)
+        url_frame = ctk.CTkFrame(frame)
+        url_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Label(url_frame, text="URL:").pack(side='left')
-        self.url_entry = ttk.Entry(url_frame, textvariable=self.url_var)
-        self.url_entry.pack(side='left', fill='x', expand=True, padx=5)
+        ctk.CTkLabel(url_frame, text="수집 대상 URL", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")).pack(anchor='w', padx=10, pady=(10, 5))
+        
+        input_inner = ctk.CTkFrame(url_frame, fg_color="transparent")
+        input_inner.pack(fill='x', padx=10, pady=(0, 10))
+        
+        self.url_entry = ctk.CTkEntry(input_inner, textvariable=self.url_var, placeholder_text="https://manatoki...", font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+        self.url_entry.pack(side='left', fill='x', expand=True)
 
         # 2. Options
-        opt_frame = ttk.LabelFrame(frame, text="옵션", padding=10)
-        opt_frame.pack(fill='x', pady=5)
+        opt_frame = ctk.CTkFrame(frame)
+        opt_frame.pack(fill='x', pady=10)
+        
+        ctk.CTkLabel(opt_frame, text="옵션 설정", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")).pack(anchor='w', padx=10, pady=(10, 5))
 
         # Row 1: 다운로드 경로 + 스레드
-        row1 = ttk.Frame(opt_frame)
-        row1.pack(fill='x')
-        ttk.Label(row1, text="다운로드 경로:").pack(side='left')
-        ttk.Entry(row1, textvariable=self.path_var).pack(side='left', fill='x', expand=True, padx=5)
-        ttk.Button(row1, text="선택", command=self._browse_path).pack(side='left')
-        ttk.Separator(row1, orient='vertical').pack(side='left', fill='y', padx=10)
-        ttk.Label(row1, text="스레드:").pack(side='left')
-        ttk.Spinbox(row1, from_=1, to=8, textvariable=self.threads_var, width=5).pack(side='left', padx=5)
+        row1 = ctk.CTkFrame(opt_frame, fg_color="transparent")
+        row1.pack(fill='x', padx=10, pady=(0, 5))
+        
+        ctk.CTkLabel(row1, text="저장 경로:", font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left')
+        ctk.CTkEntry(row1, textvariable=self.path_var, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left', fill='x', expand=True, padx=5)
+        ctk.CTkButton(row1, text="선택", command=self._browse_path, width=60, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left')
+        
+        ctk.CTkLabel(row1, text="  |  스레드:", font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left', padx=5)
+        # Spinbox replacement (Entry for now)
+        ctk.CTkEntry(row1, textvariable=self.threads_var, width=40, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left')
 
         # Row 2: 체크박스 옵션
-        row2 = ttk.Frame(opt_frame)
-        row2.pack(fill='x', pady=(5, 0))
-        ttk.Checkbutton(row2, text="캡챠 자동 해결", variable=self.captcha_auto_var, command=self._on_option_toggle).pack(side='left', padx=(0, 15))
-        ttk.Checkbutton(row2, text="백그라운드 실행 (Headless)", variable=self.headless_var, command=self._on_option_toggle).pack(side='left')
+        row2 = ctk.CTkFrame(opt_frame, fg_color="transparent")
+        row2.pack(fill='x', padx=10, pady=(0, 10))
+        
+        ctk.CTkCheckBox(row2, text="캡챠 자동 해결 (Gemini)", variable=self.captcha_auto_var, command=self._on_option_toggle, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left', padx=(0, 20))
+        ctk.CTkCheckBox(row2, text="백그라운드 실행 (Headless)", variable=self.headless_var, command=self._on_option_toggle, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left')
 
         # 3. Controls
-        btn_frame = ttk.Frame(frame, padding=5)
-        btn_frame.pack(fill='x', pady=5)
+        btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_frame.pack(fill='x', pady=10)
         
-        self.btn_start = ttk.Button(btn_frame, text="수집 시작", command=self._start_crawling)
-        self.btn_start.pack(side='left', fill='x', expand=True, padx=5)
+        self.btn_start = ctk.CTkButton(btn_frame, text="수집 시작", command=self._start_crawling, height=40, font=ctk.CTkFont(family=FONT_FAMILY, size=15, weight="bold"))
+        self.btn_start.pack(side='left', fill='x', expand=True, padx=(0, 5))
         
-        self.btn_stop = ttk.Button(btn_frame, text="중지", command=self._stop_crawling, state='disabled')
+        self.btn_stop = ctk.CTkButton(btn_frame, text="중지", command=self._stop_crawling, height=40, fg_color="#D32F2F", hover_color="#C62828", state='disabled', font=ctk.CTkFont(family=FONT_FAMILY, size=15, weight="bold"))
         if self.engine and self.engine.is_running:
-            self.btn_stop.config(state='normal')
-            self.btn_start.config(state='disabled')
-        self.btn_stop.pack(side='left', fill='x', expand=True, padx=5)
+            self.btn_stop.configure(state='normal')
+            self.btn_start.configure(state='disabled')
+        self.btn_stop.pack(side='left', fill='x', expand=True, padx=(5, 0))
 
         # 4. Logs
-        log_frame = ttk.LabelFrame(frame, text="로그", padding=5)
-        log_frame.pack(fill='both', expand=True, pady=5)
+        log_frame = ctk.CTkFrame(frame)
+        log_frame.pack(fill='both', expand=True, pady=(10, 0))
         
-        # Shared Log Area
-        self.log_area = scrolledtext.ScrolledText(log_frame, state='normal')
-        self.log_area.insert(tk.END, self.log_area_persistent.get('1.0', tk.END))
-        self.log_area.see(tk.END)
-        self.log_area.config(state='disabled')
-        self.log_area.pack(fill='both', expand=True)
+        ctk.CTkLabel(log_frame, text="실행 로그", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")).pack(anchor='w', padx=10, pady=(10, 5))
+        
+        self.log_area = ctk.CTkTextbox(log_frame, state='normal', font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+        self.log_area.insert("0.0", self.log_text_persistent)
+        self.log_area.see("end")
+        self.log_area.configure(state='disabled')
+        self.log_area.pack(fill='both', expand=True, padx=10, pady=(0, 10))
 
         self._show_view(frame)
 
@@ -189,15 +211,32 @@ class MainWindow(tk.Tk):
         self._show_view(SettingsDialog(self.content_container))
 
     def _show_latest_updates(self):
-        frame = ttk.Frame(self.content_container, padding=10)
+        frame = ctk.CTkFrame(self.content_container)
         
-        action_frame = ttk.Frame(frame)
-        action_frame.pack(fill='x', pady=(0, 8))
+        action_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        action_frame.pack(fill='x', pady=10, padx=10)
 
-        ttk.Button(action_frame, text="새로고침", command=lambda: self._load_latest_updates(tree)).pack(side='left')
-        ttk.Button(action_frame, text="선택 크롤링", command=lambda: self._crawl_selected_latest(tree)).pack(side='left', padx=6)
+        ctk.CTkButton(action_frame, text="새로고침", command=lambda: self._load_latest_updates(tree), font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left')
+        ctk.CTkButton(action_frame, text="선택 크롤링", command=lambda: self._crawl_selected_latest(tree), font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side='left', padx=10)
 
-        tree = ttk.Treeview(frame, columns=("Select", "List URL", "Title", "Last Crawled"), show='headings')
+        # Treeview Container
+        tree_frame = ctk.CTkFrame(frame)
+        tree_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+        # Standard Treeview with Scrollbar
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview", 
+                        background="#2b2b2b", 
+                        foreground="white", 
+                        fieldbackground="#2b2b2b", 
+                        borderwidth=0,
+                        font=(FONT_FAMILY, 10))
+        style.map('Treeview', background=[('selected', '#1f538d')])
+        style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat", font=(FONT_FAMILY, 10, "bold"))
+        style.map("Treeview.Heading", background=[('active', '#333333')])
+
+        tree = ttk.Treeview(tree_frame, columns=("Select", "List URL", "Title", "Last Crawled"), show='headings')
         tree.heading("Select", text="선택")
         tree.heading("List URL", text="List URL")
         tree.heading("Title", text="제목")
@@ -208,7 +247,7 @@ class MainWindow(tk.Tk):
         tree.column("Title", width=200)
         tree.column("Last Crawled", width=120, anchor='center')
 
-        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
+        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
         tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side='right', fill='y')
         tree.pack(side='left', fill='both', expand=True)
@@ -233,7 +272,7 @@ class MainWindow(tk.Tk):
             pass
         
         if self.engine and not self.engine.is_running:
-            if hasattr(self, 'btn_start') and str(self.btn_start['state']) == 'disabled':
+            if hasattr(self, 'btn_start') and str(self.btn_start.cget('state')) == 'disabled':
                 self._toggle_ui(running=False)
 
         self.after(100, self._process_queue)
@@ -243,17 +282,14 @@ class MainWindow(tk.Tk):
 
     def _append_log(self, text):
         # Update persistent store
-        self.log_area_persistent.config(state='normal')
-        self.log_area_persistent.insert(tk.END, text + "\n")
-        self.log_area_persistent.see(tk.END)
-        self.log_area_persistent.config(state='disabled')
+        self.log_text_persistent += text + "\n"
         
         # Update UI if dashboard is active
         if hasattr(self, 'log_area') and self.log_area.winfo_exists():
-            self.log_area.config(state='normal')
-            self.log_area.insert(tk.END, text + "\n")
-            self.log_area.see(tk.END)
-            self.log_area.config(state='disabled')
+            self.log_area.configure(state='normal')
+            self.log_area.insert("end", text + "\n")
+            self.log_area.see("end")
+            self.log_area.configure(state='disabled')
 
     def _on_option_toggle(self):
         """체크박스 변경 시 즉시 DB에 저장"""
@@ -359,18 +395,18 @@ class MainWindow(tk.Tk):
 
     def _stop_crawling(self):
         if self.engine: self.engine.stop()
-        if hasattr(self, 'btn_stop'): self.btn_stop.config(state='disabled')
+        if hasattr(self, 'btn_stop'): self.btn_stop.configure(state='disabled')
 
     def _toggle_ui(self, running):
         if hasattr(self, 'btn_start') and self.btn_start.winfo_exists():
-            self.btn_start.config(state='disabled' if running else 'normal')
+            self.btn_start.configure(state='disabled' if running else 'normal')
         if hasattr(self, 'btn_stop') and self.btn_stop.winfo_exists():
-            self.btn_stop.config(state='normal' if running else 'disabled')
+            self.btn_stop.configure(state='normal' if running else 'disabled')
         if hasattr(self, 'url_entry') and self.url_entry.winfo_exists():
-            self.url_entry.config(state='disabled' if running else 'normal')
+            self.url_entry.configure(state='disabled' if running else 'normal')
 
     def _show_about(self):
-        messagebox.showinfo("About", "Manatoki Crawler\nVersion 3.1.0 (Sidebar Integrated)\n\nCreated by ChoChoCho with Gemini 3")
+        messagebox.showinfo("About", "Manatoki Crawler\nVersion 3.2.0 (Sidebar Integrated)\n\nCreated by ChoChoCho with Gemini 3")
 
     def _on_close(self):
         if self.engine and self.engine.is_running:
