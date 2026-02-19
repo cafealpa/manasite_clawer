@@ -406,7 +406,7 @@ class MainWindow(ctk.CTk):
             self.url_entry.configure(state='disabled' if running else 'normal')
 
     def _show_about(self):
-        messagebox.showinfo("About", "Manatoki Crawler\nVersion 3.1.0 (Sidebar Integrated)\n\nCreated by ChoChoCho with Gemini 3")
+        messagebox.showinfo("About", "Manatoki Crawler\nVersion 3.2.0 (Sidebar Integrated)\n\nCreated by ChoChoCho with Gemini 3")
 
     def _on_close(self):
         if self.engine and self.engine.is_running:
