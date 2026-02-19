@@ -3,6 +3,7 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import os
 import threading
 import queue
+import webbrowser
 from utils.logger import logger
 from core.engine import CrawlerEngine
 from ui.settings_dialog import SettingsDialog
@@ -63,6 +64,10 @@ class MainWindow(tk.Tk):
             self.menu_buttons[text] = btn
 
         ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', pady=20)
+        
+        # Shortcut button
+        ttk.Button(self.sidebar, text="🌐 마나토끼 바로가기", command=self._open_manatoki).pack(fill='x', pady=4)
+        
         ttk.Button(self.sidebar, text="About", command=self._show_about).pack(fill='x')
         ttk.Button(self.sidebar, text="종료", command=self._on_close).pack(fill='x', pady=4)
 
@@ -81,6 +86,15 @@ class MainWindow(tk.Tk):
 
         # 4. Initial View
         self._show_dashboard()
+
+    def _open_manatoki(self):
+        url = db.get_config("MANATOKI_URL")
+        if url:
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            webbrowser.open(url)
+        else:
+            messagebox.showinfo("알림", "기본 설정에서 마나토끼 주소를 먼저 설정해주세요.")
 
     def _refresh_status(self):
         """사이드바 상태 영역 갱신"""

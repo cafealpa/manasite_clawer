@@ -12,7 +12,16 @@ class SettingsDialog(ttk.Frame):
         main_frame = ttk.Frame(self, padding=20)
         main_frame.pack(fill='both', expand=True)
 
+        # Manatoki URL
+        ttk.Label(main_frame, text="마나토끼 주소:").pack(anchor='w')
+        self.mana_url_var = tk.StringVar()
+        mana_url_frame = ttk.Frame(main_frame)
+        mana_url_frame.pack(fill='x', pady=5)
+        ttk.Entry(mana_url_frame, textvariable=self.mana_url_var).pack(side='left', fill='x', expand=True)
+        ttk.Label(main_frame, text="* 사이드바 바로가기 버튼에 사용될 URL입니다.", foreground='gray').pack(anchor='w', pady=(0, 10))
+
         # Gemini API Key
+        ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(main_frame, text="Gemini API Key:").pack(anchor='w')
         self.api_key_var = tk.StringVar()
         entry_frame = ttk.Frame(main_frame)
@@ -72,6 +81,10 @@ class SettingsDialog(ttk.Frame):
             self.db_path_var.set(db_path)
 
     def _load_settings(self):
+        # Manatoki URL
+        mana_url = db.get_config("MANATOKI_URL")
+        if mana_url:
+            self.mana_url_var.set(mana_url)
         # API Key
         key = db.get_config("GEMINI_API_KEY")
         if key:
@@ -86,6 +99,10 @@ class SettingsDialog(ttk.Frame):
             self.db_path_var.set(db_path)
 
     def _save(self):
+        # Save Manatoki URL
+        mana_url = self.mana_url_var.get().strip()
+        if mana_url:
+            db.set_config("MANATOKI_URL", mana_url)
         # Save API Key
         key = self.api_key_var.get().strip()
         if key:
