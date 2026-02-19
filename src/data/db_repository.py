@@ -69,6 +69,21 @@ class DBRepository:
         finally:
             conn.close()
 
+    def _ensure_config_table(self, conn):
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        conn.commit()
+
+    def set_db_path(self, db_path: str):
+        if db_path and db_path != self.db_path:
+            self.db_path = db_path
+            self._initialized = False
+
     def _migrate_schema(self):
         """Attempts to migrate schema for existing tables."""
         # Use direct connection to avoid recursion
@@ -132,6 +147,30 @@ class DBRepository:
             cursor = conn.cursor()
             cursor.execute("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, encrypted_value))
             conn.commit()
+
+    def get_global_config(self, key: str) -> Optional[str]:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            self._ensure_config_table(conn)
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM app_config WHERE key = ?", (key,))
+            result = cursor.fetchone()
+            if result:
+                return config_manager.decrypt_value(result[0])
+            return None
+        finally:
+            conn.close()
+
+    def set_global_config(self, key: str, value: str):
+        encrypted_value = config_manager.encrypt_value(value)
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            self._ensure_config_table(conn)
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, encrypted_value))
+            conn.commit()
+        finally:
+            conn.close()
 
     def is_url_crawled(self, url: str) -> bool:
         with self._get_connection() as conn:

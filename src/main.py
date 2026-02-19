@@ -43,9 +43,14 @@ def main():
     
     args = parser.parse_args()
 
-    # Apply DB Path if provided
+    # Apply DB Path if provided, otherwise use saved global setting if any
     if args.db_path:
-        db.db_path = args.db_path
+        db.set_db_path(args.db_path)
+        db.set_global_config("DB_PATH", args.db_path)
+    else:
+        saved_db_path = db.get_global_config("DB_PATH")
+        if saved_db_path:
+            db.set_db_path(saved_db_path)
 
     # Case 1: No arguments provided OR --gui flag -> GUI Mode
     if len(sys.argv) == 1 or args.gui:

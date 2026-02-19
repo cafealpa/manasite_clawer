@@ -38,10 +38,20 @@ class SettingsDialog(ttk.Frame):
         ttk.Button(base_frame, text="선택", command=self._browse_base_folder).pack(side='left', padx=5)
         ttk.Label(main_frame, text="* 다운로드 경로 미지정 시, 이 경로 아래에 제목별 폴더가 자동 생성됩니다.", foreground='gray').pack(anchor='w', pady=(0, 10))
 
+        # DB File
+        ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(main_frame, text="DB File:").pack(anchor='w')
+        db_frame = ttk.Frame(main_frame)
+        db_frame.pack(fill='x', pady=5)
+        self.db_path_var = tk.StringVar()
+        ttk.Entry(db_frame, textvariable=self.db_path_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(db_frame, text="Select", command=self._browse_db_file).pack(side='left', padx=5)
+        ttk.Label(main_frame, text="* Changing DB file affects all history and settings stored in DB.", foreground='gray').pack(anchor='w', pady=(0, 10))
+
         # Buttons
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill='x', pady=20)
-        ttk.Button(btn_frame, text="저장", command=self._save).pack(side='right', padx=5)
+        ttk.Button(btn_frame, text="Save", command=self._save).pack(side='right', padx=5)
 
     def _toggle_visibility(self):
         if self.show_key_var.get():
@@ -54,6 +64,13 @@ class SettingsDialog(ttk.Frame):
         if folder:
             self.base_folder_var.set(folder)
 
+    def _browse_db_file(self):
+        db_path = filedialog.askopenfilename(
+            filetypes=[("SQLite DB", "*.db"), ("All files", "*.*")]
+        )
+        if db_path:
+            self.db_path_var.set(db_path)
+
     def _load_settings(self):
         # API Key
         key = db.get_config("GEMINI_API_KEY")
@@ -63,6 +80,10 @@ class SettingsDialog(ttk.Frame):
         base_folder = db.get_config("LOCAL_BASE_STORE_FOLDER")
         if base_folder:
             self.base_folder_var.set(base_folder)
+        # DB Path (global)
+        db_path = db.get_global_config("DB_PATH") or db.db_path
+        if db_path:
+            self.db_path_var.set(db_path)
 
     def _save(self):
         # Save API Key
@@ -73,4 +94,9 @@ class SettingsDialog(ttk.Frame):
         base_folder = self.base_folder_var.get().strip()
         if base_folder:
             db.set_config("LOCAL_BASE_STORE_FOLDER", base_folder)
+        # Save DB Path (global)
+        db_path = self.db_path_var.get().strip()
+        if db_path:
+            db.set_db_path(db_path)
+            db.set_global_config("DB_PATH", db_path)
         messagebox.showinfo("설정", "저장되었습니다.")
