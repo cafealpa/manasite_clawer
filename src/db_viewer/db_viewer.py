@@ -1,7 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sqlite3
+import os
 from data.db_repository import db
+from ui.image_viewer import ImageViewer
+from utils.logger import logger
+from core.engine import CrawlerEngine
 
 class DBViewer(ttk.Frame):
     def __init__(self, master):
@@ -35,6 +38,8 @@ class DBViewer(ttk.Frame):
 
         delete_button = ttk.Button(action_frame, text="선택삭제", command=self.delete_selected)
         delete_button.pack(side='left')
+        
+        ttk.Label(action_frame, text="* 항목을 더블클릭하면 뷰어를 엽니다.", foreground='gray').pack(side='right')
 
         # --- Treeview Frame ---
         tree_frame = ttk.Frame(self)
@@ -42,11 +47,13 @@ class DBViewer(ttk.Frame):
 
         # --- Treeview ---
         self.tree = ttk.Treeview(tree_frame, columns=("Select", "ID", "Page Title", "Crawled At", "URL"), show='headings')
-        self.tree.heading("Select", text="선택")
-        self.tree.heading("ID", text="ID")
-        self.tree.heading("Page Title", text="제목")
-        self.tree.heading("Crawled At", text="수집일시")
-        self.tree.heading("URL", text="URL")
+        
+        # Setup Headings with Sort Command
+        self.tree.heading("Select", text="선택", command=self.toggle_all_checkboxes)
+        self.tree.heading("ID", text="ID", command=lambda: self.sort_column("ID", False))
+        self.tree.heading("Page Title", text="제목", command=lambda: self.sort_column("Page Title", False))
+        self.tree.heading("Crawled At", text="수집일시", command=lambda: self.sort_column("Crawled At", False))
+        self.tree.heading("URL", text="URL", command=lambda: self.sort_column("URL", False))
 
         self.tree.column("Select", width=50, anchor='center')
         self.tree.column("ID", width=50, anchor='center')
@@ -62,6 +69,26 @@ class DBViewer(ttk.Frame):
 
         # --- Bindings ---
         self.tree.bind("<Button-1>", self.on_tree_click)
+        self.tree.bind("<Double-1>", self.on_double_click)
+
+    def sort_column(self, col, reverse):
+        """Sort treeview content by column"""
+        l = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
+        
+        try:
+            if col == "ID":
+                l.sort(key=lambda t: int(t[0]), reverse=reverse)
+            else:
+                l.sort(reverse=reverse)
+        except ValueError:
+            l.sort(reverse=reverse)
+
+        # Rearrange items in sorted positions
+        for index, (val, k) in enumerate(l):
+            self.tree.move(k, '', index)
+
+        # Update heading command to reverse sort next time
+        self.tree.heading(col, command=lambda: self.sort_column(col, not reverse))
 
     def load_data(self, search_term=""):
         # Clear existing data
@@ -83,12 +110,8 @@ class DBViewer(ttk.Frame):
 
     def on_tree_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
-        if region == "heading":
-            col = self.tree.identify_column(event.x)
-            if col == "#1": # "Select" column
-                self.toggle_all_checkboxes()
-            return
-
+        # Heading click is handled by command=... in heading setup
+        
         if region != "cell":
             return
 
@@ -102,6 +125,53 @@ class DBViewer(ttk.Frame):
             var = self.check_vars[int(item_id)]
             var.set(not var.get())
             self.update_checkbox_display(item_iid, var.get())
+
+    def on_double_click(self, event):
+        item_iid = self.tree.identify_row(event.y)
+        if not item_iid:
+            return
+        
+        values = self.tree.item(item_iid, "values")
+        page_title = values[2]
+        item_id = self.tree.item(item_iid, "tags")[0]
+        
+        logger.info(f"Double-clicked item ID: {item_id}, Title: {page_title}")
+        
+        folder_path = self._get_folder_path(item_id, page_title)
+        logger.info(f"Resolved folder path: {folder_path}")
+        
+        if folder_path and os.path.exists(folder_path):
+            logger.info(f"Opening ImageViewer for: {folder_path}")
+            # Pass current_db_id to enable next episode navigation
+            ImageViewer(self, folder_path, title=page_title, current_db_id=int(item_id))
+        else:
+            logger.warning(f"Folder not found: {folder_path}")
+            messagebox.showwarning("알림", f"이미지 폴더를 찾을 수 없습니다.\n경로: {folder_path}")
+
+    def _get_folder_path(self, item_id, page_title):
+        safe_title = CrawlerEngine._sanitize_folder_name(page_title)
+        
+        # Query DB for the local_store_path of the parent mana_list
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ml.local_store_path 
+                FROM crawled_urls cu
+                JOIN mana_lists ml ON cu.mana_list_id = ml.id
+                WHERE cu.id = ?
+            """, (item_id,))
+            row = cursor.fetchone()
+            
+            base_path = None
+            if row and row[0]:
+                base_path = row[0]
+                logger.debug(f"Found base path in DB: {base_path}")
+            else:
+                logger.debug("No base path in DB, using default 'downloaded_files'")
+                base_path = "downloaded_files"
+                
+            full_path = os.path.join(base_path, safe_title)
+            return full_path
 
     def update_checkbox_display(self, item_iid, is_checked):
         current_values = self.tree.item(item_iid, 'values')
